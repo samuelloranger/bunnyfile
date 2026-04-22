@@ -10,7 +10,6 @@ import {
   UserCog,
   UserPlus,
 } from 'lucide-react';
-import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Badge } from '~/components/ui/badge';
@@ -268,7 +267,7 @@ function InviteUserDialog() {
     },
   });
 
-  function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: { preventDefault(): void }) {
     e.preventDefault();
     setError(null);
     createUser.mutate();
@@ -314,7 +313,7 @@ function InviteUserDialog() {
             <Label htmlFor="invite-password">Initial password</Label>
             <Input
               id="invite-password"
-              type="text"
+              type="password"
               required
               minLength={8}
               leftIcon={<KeyRound />}

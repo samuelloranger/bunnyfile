@@ -99,27 +99,20 @@ export type Account = typeof account.$inferSelect;
  * Source of truth is the disk; rows are derived data (size, mime, hash).
  * `path` is relative to DATA_DIR, POSIX-separated, no leading slash.
  */
-export const fileIndex = sqliteTable(
-  'file_index',
-  {
-    path: text('path').primaryKey(),
-    size: integer('size').notNull(),
-    mtimeMs: integer('mtime_ms').notNull(),
-    inode: integer('inode').notNull(),
-    sha256: text('sha256'),
-    mime: text('mime').notNull(),
-    uploadedByUserId: text('uploaded_by_user_id').references(() => user.id, {
-      onDelete: 'set null',
-    }),
-    indexedAt: integer('indexed_at', { mode: 'timestamp_ms' })
-      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-      .notNull(),
-  },
-  (t) => [
-    // Parent-dir prefix queries: `WHERE parent = ?`
-    index('file_index_parent_idx').on(t.path),
-  ],
-);
+export const fileIndex = sqliteTable('file_index', {
+  path: text('path').primaryKey(),
+  size: integer('size').notNull(),
+  mtimeMs: integer('mtime_ms').notNull(),
+  inode: integer('inode').notNull(),
+  sha256: text('sha256'),
+  mime: text('mime').notNull(),
+  uploadedByUserId: text('uploaded_by_user_id').references(() => user.id, {
+    onDelete: 'set null',
+  }),
+  indexedAt: integer('indexed_at', { mode: 'timestamp_ms' })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});
 
 export type FileIndexRow = typeof fileIndex.$inferSelect;
 

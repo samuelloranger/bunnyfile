@@ -180,9 +180,9 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
     };
   })
 
-  .get(
+  .post(
     '/api/shares/public/:token/file',
-    async ({ request, params, query, set }): Promise<Response | { error: string }> => {
+    async ({ request, params, body, set }): Promise<Response | { error: string }> => {
       const ip = requestIp(request);
       if (!allowShareRequest(ip, params.token)) {
         set.status = 429;
@@ -197,7 +197,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
 
       const row = state.row;
       if (row.passwordHash) {
-        if (!query.password || !(await Bun.password.verify(query.password, row.passwordHash))) {
+        if (!body.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
           set.status = 401;
           return { error: 'Password required or invalid.' };
         }
@@ -211,18 +211,34 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
           .where(eq(fileIndex.path, row.path))
           .then((r) => r[0]?.mime ?? mimeFromName(basenameOf(row.path)));
 
-        await db
-          .update(shareLink)
-          .set({
-            downloadCount: sql`${shareLink.downloadCount} + 1`,
-          })
-          .where(eq(shareLink.id, row.id));
+        if (row.maxDownloads != null) {
+          const updated = await db
+            .update(shareLink)
+            .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
+            .where(
+              and(
+                eq(shareLink.id, row.id),
+                sql`${shareLink.downloadCount} < ${shareLink.maxDownloads}`,
+              ),
+            )
+            .returning({ id: shareLink.id });
+          if (updated.length === 0) {
+            set.status = 410;
+            return { error: statusToMessage('max_downloads') };
+          }
+        } else {
+          await db
+            .update(shareLink)
+            .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
+            .where(eq(shareLink.id, row.id));
+        }
 
+        const name = basenameOf(row.path);
         return new Response(Bun.file(abs).stream(), {
           headers: {
             'Content-Type': mime,
             'Content-Length': String(stat.size),
-            'Content-Disposition': `attachment; filename="${basenameOf(row.path)}"`,
+            'Content-Disposition': `attachment; filename="${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
           },
         });
       } catch (err) {
@@ -234,7 +250,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       }
     },
     {
-      query: t.Object({
+      body: t.Object({
         password: t.Optional(t.String()),
       }),
     },

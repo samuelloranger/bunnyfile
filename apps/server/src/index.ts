@@ -21,7 +21,7 @@ const version = Bun.env.APP_VERSION ?? '0.0.1';
 const WEB_DIST = resolve(import.meta.dir, '../../web/dist');
 const INDEX_HTML = join(WEB_DIST, 'index.html');
 
-export const app = new Elysia()
+export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   .use(
     cors({
       // Accept localhost / RFC1918 / env-allowed origins (see auth/origins.ts).

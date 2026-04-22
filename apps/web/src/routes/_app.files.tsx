@@ -1,4 +1,5 @@
 import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import {
@@ -81,6 +82,11 @@ function FilesPage() {
   const [sharePassword, setSharePassword] = useState('');
   const [shareMaxDownloads, setShareMaxDownloads] = useState('');
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    current: number;
+    total: number;
+    percent: number;
+  } | null>(null);
   const list = useQuery(filesQuery(path, offset, PAGE_SIZE));
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -157,12 +163,36 @@ function FilesPage() {
 
   const upload = useMutation({
     mutationFn: async (files: File[]) => {
-      // Sequential — keeps memory bounded for large files. Parallelize later
-      // once we have an upload queue UI.
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]!;
         const target = path ? `${path}/${file.name}` : file.name;
-        const { error } = await api.api.files.upload.post({ file, path: target });
-        if (error) throw error;
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('path', target);
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              setUploadProgress({
+                current: i + 1,
+                total: files.length,
+                percent: Math.round((e.loaded / e.total) * 100),
+              });
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              const body = JSON.parse(xhr.responseText) as { error?: string };
+              reject(new Error(body?.error ?? 'Upload failed'));
+            }
+          };
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.onabort = () => reject(new Error('Upload aborted'));
+          xhr.open('POST', '/api/files/upload');
+          xhr.send(fd);
+        });
       }
     },
     onSuccess: (_data, files) => {
@@ -176,6 +206,7 @@ function FilesPage() {
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     },
+    onSettled: () => setUploadProgress(null),
   });
 
   const rename = useMutation({
@@ -397,8 +428,14 @@ function FilesPage() {
           >
             New folder
           </Button>
-          <Button leftIcon={<UploadCloud />} onClick={openPicker} loading={upload.isPending}>
-            Upload
+          <Button
+            leftIcon={<UploadCloud />}
+            onClick={openPicker}
+            loading={upload.isPending && !uploadProgress}
+          >
+            {uploadProgress
+              ? `${uploadProgress.current}/${uploadProgress.total} · ${uploadProgress.percent}%`
+              : 'Upload'}
           </Button>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={onPicked} />
         </div>
@@ -702,8 +739,13 @@ function FilesPage() {
               />
             </div>
             {shareUrl && (
-              <div className="w-full min-w-0 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-2">
-                <p className="break-all text-xs text-[hsl(var(--muted-foreground))]">{shareUrl}</p>
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-full min-w-0 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-2">
+                  <p className="break-all text-xs text-[hsl(var(--muted-foreground))]">{shareUrl}</p>
+                </div>
+                <div className="rounded-lg border border-[hsl(var(--border))] bg-white p-3">
+                  <QRCodeSVG value={shareUrl} size={160} />
+                </div>
               </div>
             )}
             <div className="flex flex-wrap items-center justify-end gap-2">

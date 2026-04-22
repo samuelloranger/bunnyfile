@@ -13,7 +13,7 @@
 | Phase | State | Notes |
 |---|---|---|
 | **0 — Foundation** | ✅ Complete | Monorepo, Elysia+Vite, Docker (fixed 3900/3901), CI, Biome, migration runner (Drizzle) |
-| **2 — Auth** | 🟡 Partial | Auth is done and core shares are shipped (model/API/public page/rate limit/tests); QR code in share dialog remains. |
+| **2 — Auth** | ✅ Complete | Auth, shares, public page, rate limiting, tests, QR code in share dialog. |
 | **1 — File operations** | ✅ Complete | Filesystem-first core file ops are shipped (browse/upload/download/delete/move, folder creation, previews, keyboard nav, DnD) with backend endpoint coverage via `bun:test` (Playwright removed from Phase 1 scope). |
 | **3 · tus** | ⬜ Not started | |
 | **4 · S3 API** | ⬜ Not started | |
@@ -28,7 +28,7 @@
 - Theme system (light / dark / system) wired through CSS custom properties
 
 **Still missing from Phase 2 before it can close:**
-- QR code in share dialog
+- ~~QR code in share dialog~~ ✅
 
 ---
 
@@ -195,7 +195,7 @@ Each phase produces **working, usable software**. Phase N always leaves BunnyFil
 
 - [x] Share-link model: `{ id, path, expires_at, password_hash?, max_downloads?, created_by }`
 - [x] `POST /api/shares` / public share metadata and download endpoints (`GET /api/shares/public/:token`, `GET /api/shares/public/:token/file`) / `DELETE /api/shares/:id`
-- [ ] Share-link UI: "Share" button → dialog → copy link + QR code *(copy link done, QR pending)*
+- [x] Share-link UI: "Share" button → dialog → copy link + QR code
 - [x] Public share page (no auth, consistent look with the authenticated app)
 - [x] Expired/exceeded link renders a friendly 410 page
 - [x] Rate limiting on public share access (in-memory token bucket)

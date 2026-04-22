@@ -1,5 +1,5 @@
 import { statfs } from 'node:fs/promises';
-import { desc, eq, like, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth/auth';
 import { db } from '../db';
@@ -46,6 +46,10 @@ type RecentFileEntry = {
   mtimeMs: number;
 };
 
+function escapeLike(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 async function callerFromRequest(request: Request) {
   return auth.api.getSession({ headers: request.headers });
 }
@@ -62,8 +66,11 @@ async function listPrefix(prefix: string): Promise<ListEntry[]> {
   // Given `prefix = 'a/b'`, descendants are rows where path LIKE 'a/b/%'.
   // Immediate children have no further `/` after the prefix, so we filter
   // in-memory — simpler than a regex query.
-  const likeExpr = prefix ? `${prefix}/%` : '%';
-  const descendants = await db.select().from(fileIndex).where(like(fileIndex.path, likeExpr));
+  const likeExpr = prefix ? `${escapeLike(prefix)}/%` : '%';
+  const descendants = await db
+    .select()
+    .from(fileIndex)
+    .where(sql`${fileIndex.path} LIKE ${likeExpr} ESCAPE '\\'`);
 
   const files: FileEntry[] = [];
   const dirCounts = new Map<string, number>();
@@ -156,6 +163,10 @@ export const filesRoutes = new Elysia({ name: 'files' })
     if (!s?.user) {
       set.status = 401;
       return { error: 'unauthorized' as const };
+    }
+    if (s.user.role !== 'admin') {
+      set.status = 403;
+      return { error: 'forbidden' as const };
     }
     return await scan();
   })
@@ -467,9 +478,29 @@ export const filesRoutes = new Elysia({ name: 'files' })
         return { error: 'invalid path' as const };
       }
       try {
+        // Read existing row before moving (to preserve metadata)
+        const existingRow = await db
+          .select()
+          .from(fileIndex)
+          .where(eq(fileIndex.path, path))
+          .then((r) => r[0]);
+
         await moveFile(path, newPath);
+
+        // Stat the destination directly — no full scan needed
+        const { stat: newStat } = await openStream(newPath);
+        const mime = existingRow?.mime ?? mimeFromName(basenameOf(newPath));
+
         await db.delete(fileIndex).where(eq(fileIndex.path, path));
-        await scan();
+        await db.insert(fileIndex).values({
+          path: newPath,
+          size: newStat.size,
+          mtimeMs: Math.round(newStat.mtimeMs),
+          inode: Number(newStat.ino),
+          sha256: existingRow?.sha256 ?? null,
+          mime,
+          uploadedByUserId: existingRow?.uploadedByUserId ?? null,
+        });
         broadcastFilesChanged();
         return { ok: true as const, path: newPath };
       } catch (err) {

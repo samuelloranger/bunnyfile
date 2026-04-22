@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   docker:
+    name: Build docker image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

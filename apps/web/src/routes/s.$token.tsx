@@ -35,8 +35,11 @@ function PublicSharePage() {
         `/api/shares/public/${encodeURIComponent(token)}/file`,
         window.location.origin,
       );
-      if (password.trim()) url.searchParams.set('password', password);
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: password.trim() || undefined }),
+      });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? 'Download failed');
