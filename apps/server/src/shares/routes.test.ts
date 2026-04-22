@@ -90,18 +90,26 @@ describe('shares routes', () => {
     expect(page.status).toBe('ok');
     expect(page.requiresPassword).toBeTrue();
 
-    const noPasswordRes = await request(`/api/shares/public/${created.token}/file`);
+    const noPasswordRes = await request(`/api/shares/public/${created.token}/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
     expect(noPasswordRes.status).toBe(401);
 
-    const downloadRes = await request(
-      `/api/shares/public/${created.token}/file?password=secret123`,
-    );
+    const downloadRes = await request(`/api/shares/public/${created.token}/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'secret123' }),
+    });
     expect(downloadRes.status).toBe(200);
     expect(await downloadRes.text()).toBe('hello world');
 
-    const secondDownload = await request(
-      `/api/shares/public/${created.token}/file?password=secret123`,
-    );
+    const secondDownload = await request(`/api/shares/public/${created.token}/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'secret123' }),
+    });
     expect(secondDownload.status).toBe(410);
   });
 

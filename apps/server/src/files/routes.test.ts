@@ -13,7 +13,7 @@ mock.module('../auth/auth', () => ({
   auth: {
     api: {
       getSession: async () => ({
-        user: { id: 'files-test-user' },
+        user: { id: 'files-test-user', role: 'admin' },
       }),
     },
   },
