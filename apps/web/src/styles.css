@@ -166,9 +166,13 @@
     *,
     *::before,
     *::after {
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion override must win over component-level animation specificity */
       animation-duration: 0.01ms !important;
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion override must win over component-level animation specificity */
       animation-iteration-count: 1 !important;
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion override must win over component-level animation specificity */
       transition-duration: 0.01ms !important;
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion override must win over component-level animation specificity */
       scroll-behavior: auto !important;
     }
   }

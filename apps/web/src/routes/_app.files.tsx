@@ -1,5 +1,4 @@
 import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
-import { QRCodeSVG } from 'qrcode.react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import {
@@ -22,6 +21,7 @@ import {
   UploadCloud,
   Video,
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '~/components/ui/badge';
@@ -741,7 +741,9 @@ function FilesPage() {
             {shareUrl && (
               <div className="flex flex-col items-center gap-3">
                 <div className="w-full min-w-0 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-2">
-                  <p className="break-all text-xs text-[hsl(var(--muted-foreground))]">{shareUrl}</p>
+                  <p className="break-all text-xs text-[hsl(var(--muted-foreground))]">
+                    {shareUrl}
+                  </p>
                 </div>
                 <div className="rounded-lg border border-[hsl(var(--border))] bg-white p-3">
                   <QRCodeSVG value={shareUrl} size={160} />

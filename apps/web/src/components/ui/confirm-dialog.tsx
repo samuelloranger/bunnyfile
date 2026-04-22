@@ -21,7 +21,7 @@ export interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: ConfirmDialogTone;
-  onConfirm: () => void | Promise<unknown>;
+  onConfirm: () => unknown;
 }
 
 export function ConfirmDialog({
