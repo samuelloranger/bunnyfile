@@ -1,0 +1,11 @@
+node_modules
+dist
+build
+.tanstack
+.output
+.git
+.github
+data
+*.sqlite*
+.env
+.env.local

@@ -1,0 +1,146 @@
+import { useNavigate } from '@tanstack/react-router';
+import { Bell, HelpCircle, LogOut, Menu, Monitor, Moon, Search, Sun, User } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
+import { Button } from '~/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from '~/components/ui/dropdown-menu';
+import { Input } from '~/components/ui/input';
+import { Kbd } from '~/components/ui/kbd';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
+import { authClient } from '~/lib/auth-client';
+import { useTheme } from '~/lib/theme';
+
+export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
+  const { theme, setTheme, resolved } = useTheme();
+  const session = authClient.useSession();
+  const navigate = useNavigate();
+  const user = session.data?.user;
+  const initials = user?.name
+    ? user.name
+        .split(' ')
+        .map((s) => s[0])
+        .slice(0, 2)
+        .join('')
+    : (user?.email?.[0]?.toUpperCase() ?? '?');
+
+  async function handleSignOut() {
+    await authClient.signOut();
+    navigate({ to: '/login' });
+  }
+
+  return (
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.8)] px-4 backdrop-blur-md sm:px-6">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="md:hidden"
+        onClick={onMenuClick}
+        aria-label="Open navigation"
+      >
+        <Menu />
+      </Button>
+
+      <div className="relative max-w-md flex-1">
+        <Input
+          type="search"
+          placeholder="Search files, folders, shares…"
+          leftIcon={<Search />}
+          rightIcon={<Kbd>⌘K</Kbd>}
+        />
+      </div>
+
+      <div className="ml-auto flex items-center gap-1.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label="Help">
+              <HelpCircle />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Help and shortcuts</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
+              <Bell />
+              <span
+                aria-hidden
+                className="absolute right-2 top-2 size-1.5 rounded-full bg-[hsl(var(--accent))]"
+              />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Notifications</TooltipContent>
+        </Tooltip>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label="Toggle theme">
+              {resolved === 'dark' ? <Moon /> : <Sun />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuLabel>Theme</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={theme}
+              onValueChange={(v) => setTheme(v as 'light' | 'dark' | 'system')}
+            >
+              <DropdownMenuRadioItem value="light">
+                <Sun /> Light
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">
+                <Moon /> Dark
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="system">
+                <Monitor /> System
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="ml-1 rounded-full outline-none transition focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
+              aria-label="Account menu"
+            >
+              <Avatar size="md">
+                {user?.image && <AvatarImage src={user.image} alt="" />}
+                <AvatarFallback>{initials}</AvatarFallback>
+              </Avatar>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <div className="px-2 py-1.5">
+              <p className="truncate text-sm font-medium">{user?.name ?? 'Guest'}</p>
+              <p className="truncate text-xs text-[hsl(var(--muted-foreground))]">
+                {user?.email ?? '—'}
+              </p>
+            </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => navigate({ to: '/profile' })}>
+              <User /> Profile
+              <DropdownMenuShortcut>⌘P</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem>
+              <HelpCircle /> Support
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem destructive onSelect={handleSignOut}>
+              <LogOut /> Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </header>
+  );
+}

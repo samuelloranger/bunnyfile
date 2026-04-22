@@ -1,0 +1,47 @@
+# Dev stack. Fixed host ports:
+#   http://localhost:3900  — web (Vite)
+#   http://localhost:3901  — server API
+# Same ports inside the container network so no translation is needed.
+services:
+  server:
+    image: oven/bun:1.3
+    working_dir: /app
+    command: sh -c "bun install && bun run --hot apps/server/src/index.ts"
+    environment:
+      SERVER_PORT: 3901
+      SERVER_HOST: 0.0.0.0
+      DATA_DIR: /app/data/files
+      DB_PATH: /app/data/bunnyfile.sqlite
+    volumes:
+      - ./:/app
+      - server_node_modules:/app/node_modules
+      - ./data:/app/data
+    ports:
+      - '3901:3901'
+    healthcheck:
+      test: ['CMD-SHELL', 'bun -e "await fetch(\"http://localhost:3901/api/health\")"']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    image: oven/bun:1.3
+    working_dir: /app
+    command: sh -c "bun install && cd apps/web && bun run dev -- --host 0.0.0.0"
+    environment:
+      WEB_PORT: 3900
+      # Vite dev server proxies /api to the server container. Node-only — NOT
+      # exposed to the browser bundle (the name doesn't start with VITE_).
+      SERVER_URL: http://server:3901
+    volumes:
+      - ./:/app
+      - web_node_modules:/app/node_modules
+    ports:
+      - '3900:3900'
+    depends_on:
+      server:
+        condition: service_started
+
+volumes:
+  server_node_modules:
+  web_node_modules:

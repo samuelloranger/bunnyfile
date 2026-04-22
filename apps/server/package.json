@@ -1,0 +1,32 @@
+{
+  "name": "@bunnyfile/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/db/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "auth:generate": "bunx @better-auth/cli@latest generate --output ./src/db/schema.ts --yes"
+  },
+  "dependencies": {
+    "@bunnyfile/shared": "workspace:*",
+    "@elysiajs/cors": "1.4.1",
+    "@elysiajs/cron": "1.4.1",
+    "better-auth": "1.6.7",
+    "drizzle-orm": "0.45.2",
+    "elysia": "1.4.28"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.10"
+  }
+}

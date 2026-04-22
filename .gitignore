@@ -1,0 +1,35 @@
+node_modules
+dist
+build
+.tanstack
+.output
+.vinxi
+.nitro
+coverage
+
+# env
+.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+*.log
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# runtime data (local filesystem storage for dev)
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# generated route tree
+**/src/routeTree.gen.ts
+
+# bun
+bun.lock
+!bun.lock

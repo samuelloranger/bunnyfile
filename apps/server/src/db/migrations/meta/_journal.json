@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1776869197418,
+      "tag": "0000_colorful_quentin_quire",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1776872847702,
+      "tag": "0001_tiresome_alice",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776878400000,
+      "tag": "0002_mellow_butterfly",
+      "breakpoints": true
+    }
+  ]
+}
