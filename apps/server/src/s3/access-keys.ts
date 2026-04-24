@@ -49,9 +49,9 @@ export function generateSecretAccessKey(): string {
 }
 
 export function lookupS3SecretKey(accessKeyId: string): string | null {
-  const envKeyId = Bun.env.S3_ACCESS_KEY_ID ?? 'dev-access-key';
-  if (accessKeyId === envKeyId) {
-    return Bun.env.S3_SECRET_ACCESS_KEY ?? 'dev-secret-key';
+  const envKeyId = Bun.env.S3_ACCESS_KEY_ID;
+  if (envKeyId && accessKeyId === envKeyId) {
+    return Bun.env.S3_SECRET_ACCESS_KEY ?? null;
   }
   const row = db
     .select({ secretKeyEncrypted: s3AccessKey.secretKeyEncrypted })
