@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import logo from '~/assets/logo-platform-dark.svg';
 import { createFileRoute, Navigate, Outlet } from '@tanstack/react-router';
+import logo from '~/assets/logo-platform-dark.svg';
 import { AppShell } from '~/components/layout/app-shell';
 import { authClient } from '~/lib/auth-client';
 import { setupStatusQuery } from '~/lib/setup';

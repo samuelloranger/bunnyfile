@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import logo from '~/assets/logo-platform-dark.svg';
 import { Link, useRouterState } from '@tanstack/react-router';
 import {
   FolderOpen,
@@ -13,6 +12,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import logo from '~/assets/logo-platform-dark.svg';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Separator } from '~/components/ui/separator';
