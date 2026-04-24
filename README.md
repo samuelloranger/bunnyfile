@@ -2,7 +2,7 @@
 
 > Files, shared. That's it.
 
-Lightweight self-hosted file hosting and sharing, built on Bun. S3-compatible API, resumable uploads. Replaces the "files" half of Nextcloud — nothing more.
+Lightweight self-hosted file hosting and sharing, built on Bun. S3-compatible API, upload progress feedback, and a minimal architecture. Replaces the "files" half of Nextcloud — nothing more.
 
 **Status:** Pre-alpha. See [`PLAN.md`](./PLAN.md).
 
@@ -22,7 +22,7 @@ If you need those, Nextcloud and Seafile are great. BunnyFile wins by being less
 - **Fast:** cold start <500ms, idle RAM <100MB
 - **Compatible:** first-class S3 API — rclone, aws-cli, restic, kopia, Cyberduck all just work
 - **Minimal:** Bun + SQLite + local filesystem. No Redis, no MariaDB, no Elasticsearch
-- **Reliable:** resumable uploads via tus, byte-exact integrity testing
+- **Reliable:** upload progress feedback in the SPA plus byte-exact integrity testing
 
 ## Stack
 

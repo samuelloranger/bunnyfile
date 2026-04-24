@@ -12,6 +12,8 @@ import { user } from './db/schema';
 import { filesCron } from './files/cron';
 import { filesRoutes } from './files/routes';
 import { filesWatcher } from './files/watcher';
+import { accessKeyRoutes } from './s3/access-keys';
+import { s3Routes } from './s3/routes';
 import { sharesRoutes } from './shares/routes';
 import { usersRoutes } from './users/routes';
 
@@ -37,6 +39,8 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   .use(usersRoutes)
   .use(filesRoutes)
   .use(sharesRoutes)
+  .use(accessKeyRoutes)
+  .use(s3Routes)
   .use(filesCron)
   .use(filesWatcher)
   .group('/api', (api) =>

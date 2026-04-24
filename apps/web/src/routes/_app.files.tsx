@@ -52,6 +52,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip
 import { api } from '~/lib/api';
 import { cn } from '~/lib/cn';
 import { type Entry, filesQuery, humanSize, humanTime } from '~/lib/files';
+import {
+  parseUploadErrorMessage,
+  toUploadProgress,
+  uploadButtonLabel,
+} from '~/lib/upload-progress';
 
 type ListedEntry = Entry & { isParentLink?: boolean };
 type SortMode = 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc' | 'date-desc' | 'date-asc';
@@ -172,20 +177,14 @@ function FilesPage() {
           fd.append('file', file);
           fd.append('path', target);
           xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              setUploadProgress({
-                current: i + 1,
-                total: files.length,
-                percent: Math.round((e.loaded / e.total) * 100),
-              });
-            }
+            const next = toUploadProgress(e, i + 1, files.length);
+            if (next) setUploadProgress(next);
           };
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
               resolve();
             } else {
-              const body = JSON.parse(xhr.responseText) as { error?: string };
-              reject(new Error(body?.error ?? 'Upload failed'));
+              reject(new Error(parseUploadErrorMessage(xhr.responseText)));
             }
           };
           xhr.onerror = () => reject(new Error('Network error'));
@@ -433,9 +432,7 @@ function FilesPage() {
             onClick={openPicker}
             loading={upload.isPending && !uploadProgress}
           >
-            {uploadProgress
-              ? `${uploadProgress.current}/${uploadProgress.total} · ${uploadProgress.percent}%`
-              : 'Upload'}
+            {uploadButtonLabel(uploadProgress)}
           </Button>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={onPicked} />
         </div>
@@ -863,6 +860,20 @@ function DirectoryRow({
   selected: boolean;
   onNavigate: (path: string) => void;
 }) {
+  const qc = useQueryClient();
+  const del = useMutation({
+    mutationFn: async () => {
+      const { error } = await api.api.files.folder.delete({ path: entry.path });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      toast.success(`Deleted ${entry.name}`);
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
+    },
+  });
   const droppableId = dndId('dir', entry.path);
   const { ref: dropRef, isDropTarget } = useDroppable({ id: droppableId });
   return (
@@ -888,9 +899,51 @@ function DirectoryRow({
       </Td>
       <Td className="whitespace-nowrap text-[hsl(var(--muted-foreground))]">—</Td>
       <Td className="text-right">
-        <Button variant="ghost" size="icon-sm" aria-label="Open folder">
-          <ChevronRight />
-        </Button>
+        {entry.isParentLink ? (
+          <Button variant="ghost" size="icon-sm" aria-label="Open folder">
+            <ChevronRight />
+          </Button>
+        ) : (
+          <div className="flex items-center justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Open folder"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate(entry.path);
+              }}
+            >
+              <ChevronRight />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`More actions for ${entry.name}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <ConfirmDialog
+                  trigger={
+                    <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  }
+                  title={`Delete "${entry.name}"?`}
+                  description="The folder and all its contents will be permanently removed. This cannot be undone."
+                  confirmLabel="Delete"
+                  tone="destructive"
+                  onConfirm={() => del.mutateAsync()}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
       </Td>
     </tr>
   );

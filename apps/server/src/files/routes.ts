@@ -17,6 +17,7 @@ import {
   PathError,
   readRange,
   removeFile,
+  removeFolder,
   writeUpload,
 } from './store';
 
@@ -264,6 +265,43 @@ export const filesRoutes = new Elysia({ name: 'files' })
       body: t.Object({
         path: t.String({ minLength: 1 }),
       }),
+    },
+  )
+
+  .delete(
+    '/api/files/folder',
+    async ({ request, body, set }) => {
+      const s = await callerFromRequest(request);
+      if (!s?.user) {
+        set.status = 401;
+        return { error: 'unauthorized' as const };
+      }
+      const path = safeRelPath(body.path);
+      if (!path) {
+        set.status = 400;
+        return { error: 'invalid path' as const };
+      }
+      try {
+        await removeFolder(path);
+        await db
+          .delete(fileIndex)
+          .where(sql`${fileIndex.path} = ${path} OR ${fileIndex.path} LIKE ${`${path}/%`}`);
+        broadcastFilesChanged();
+        return { ok: true as const };
+      } catch (err) {
+        if (err instanceof PathError) {
+          if (err.code === 'not_found') {
+            set.status = 404;
+            return { error: 'not found' as const };
+          }
+          set.status = 400;
+          return { error: err.message };
+        }
+        throw err;
+      }
+    },
+    {
+      body: t.Object({ path: t.String({ minLength: 1 }) }),
     },
   )
 
