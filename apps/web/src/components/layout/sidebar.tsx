@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import logo from '~/assets/logo-platform-dark.svg';
 import { Link, useRouterState } from '@tanstack/react-router';
 import {
   FolderOpen,
@@ -93,11 +94,7 @@ export function Sidebar({ className }: { className?: string }) {
       )}
     >
       <div className="flex h-14 items-center gap-2 px-4">
-        <div className="flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-[hsl(var(--primary))] to-[hsl(var(--accent))] text-white shadow-sm">
-          <span aria-hidden className="text-base leading-none">
-            🐰
-          </span>
-        </div>
+        <img src={logo} alt="BunnyFile" className="size-8 rounded-lg shadow-sm" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold leading-tight">BunnyFile</p>
           <p className="truncate text-[11px] text-[hsl(var(--muted-foreground))]">Files, shared.</p>

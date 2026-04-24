@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import logo from '~/assets/logo-platform-dark.svg';
 
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
@@ -26,11 +27,7 @@ export function AuthCard({
   return (
     <div className="w-full max-w-md">
       <div className="mb-6 flex flex-col items-center gap-3">
-        <div className="flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[hsl(var(--primary))] to-[hsl(var(--accent))] text-white shadow-lg shadow-[hsl(var(--primary)/0.35)]">
-          <span aria-hidden className="text-xl leading-none">
-            🐰
-          </span>
-        </div>
+        <img src={logo} alt="BunnyFile" className="size-12 rounded-2xl shadow-lg" />
         <div className="text-center">
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
           {description && (
