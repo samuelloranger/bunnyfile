@@ -66,14 +66,18 @@ async function writePart(
 
 function parseCompleteBody(xml: string): Array<{ partNumber: number; etag: string }> | null {
   const parts: Array<{ partNumber: number; etag: string }> = [];
-  const re =
-    /<Part\b[^>]*>[\s\S]*?<PartNumber[^>]*>(\d+)<\/PartNumber>[\s\S]*?<ETag[^>]*>([^<]+)<\/ETag>[\s\S]*?<\/Part>/g;
+  const partRe = /<Part\b[^>]*>([\s\S]*?)<\/Part>/g;
   for (;;) {
-    const match = re.exec(xml);
-    if (match === null) break;
-    const partNumber = Number.parseInt(match[1]!, 10);
-    const etag = match[2]!
+    const partMatch = partRe.exec(xml);
+    if (partMatch === null) break;
+    const content = partMatch[1]!;
+    const pnMatch = /<PartNumber[^>]*>(\d+)<\/PartNumber>/.exec(content);
+    const etagMatch = /<ETag[^>]*>([^<]+)<\/ETag>/.exec(content);
+    if (!pnMatch || !etagMatch) return null;
+    const partNumber = Number.parseInt(pnMatch[1]!, 10);
+    const etag = etagMatch[1]!
       .trim()
+      .replace(/&#34;/g, '')
       .replace(/&quot;/g, '')
       .replace(/^"|"$/g, '');
     if (Number.isNaN(partNumber) || partNumber < 1 || partNumber > 10000) return null;
