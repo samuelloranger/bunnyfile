@@ -860,6 +860,20 @@ function DirectoryRow({
   selected: boolean;
   onNavigate: (path: string) => void;
 }) {
+  const qc = useQueryClient();
+  const del = useMutation({
+    mutationFn: async () => {
+      const { error } = await api.api.files.folder.delete({ path: entry.path });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      toast.success(`Deleted ${entry.name}`);
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
+    },
+  });
   const droppableId = dndId('dir', entry.path);
   const { ref: dropRef, isDropTarget } = useDroppable({ id: droppableId });
   return (
@@ -885,9 +899,43 @@ function DirectoryRow({
       </Td>
       <Td className="whitespace-nowrap text-[hsl(var(--muted-foreground))]">—</Td>
       <Td className="text-right">
-        <Button variant="ghost" size="icon-sm" aria-label="Open folder">
-          <ChevronRight />
-        </Button>
+        {entry.isParentLink ? (
+          <Button variant="ghost" size="icon-sm" aria-label="Open folder">
+            <ChevronRight />
+          </Button>
+        ) : (
+          <div className="flex items-center justify-end gap-1">
+            <Button variant="ghost" size="icon-sm" aria-label="Open folder" onClick={(e) => { e.stopPropagation(); onNavigate(entry.path); }}>
+              <ChevronRight />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`More actions for ${entry.name}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <ConfirmDialog
+                  trigger={
+                    <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  }
+                  title={`Delete "${entry.name}"?`}
+                  description="The folder and all its contents will be permanently removed. This cannot be undone."
+                  confirmLabel="Delete"
+                  tone="destructive"
+                  onConfirm={() => del.mutateAsync()}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
       </Td>
     </tr>
   );

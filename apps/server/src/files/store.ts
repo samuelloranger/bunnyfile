@@ -13,7 +13,7 @@ await mkdir(DATA_ROOT, { recursive: true });
 
 export class PathError extends Error {
   constructor(
-    public code: 'traversal' | 'not_found' | 'is_directory' | 'exists',
+    public code: 'traversal' | 'not_found' | 'is_directory' | 'not_directory' | 'exists',
     message: string,
   ) {
     super(message);
@@ -123,6 +123,18 @@ export async function removeFile(rel: string): Promise<void> {
   }
   if (st.isDirectory()) throw new PathError('is_directory', `is a directory: ${rel}`);
   await rm(path);
+}
+
+export async function removeFolder(rel: string): Promise<void> {
+  const path = absFromRelOrThrow(rel);
+  let st: Awaited<ReturnType<typeof stat>>;
+  try {
+    st = await stat(path);
+  } catch {
+    throw new PathError('not_found', `not found: ${rel}`);
+  }
+  if (!st.isDirectory()) throw new PathError('not_directory', `not a directory: ${rel}`);
+  await rm(path, { recursive: true });
 }
 
 export async function moveFile(fromRel: string, toRel: string): Promise<void> {
