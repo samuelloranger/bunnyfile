@@ -349,6 +349,73 @@ function createS3Handler() {
           }),
         );
       }
+      // ListObjects v1 (no list-type=2 param)
+      if (request.method === 'GET') {
+        const prefix = url.searchParams.get('prefix') ?? '';
+        const delimiter = url.searchParams.get('delimiter') ?? '';
+        const marker = url.searchParams.get('marker') ?? '';
+        const maxKeys = Math.min(
+          Math.max(Number.parseInt(url.searchParams.get('max-keys') ?? '1000', 10) || 1000, 1),
+          1000,
+        );
+        const bucketDir = resolve(S3_ROOT, bucket);
+        try {
+          await stat(bucketDir);
+        } catch {
+          return s3Err(set, 404, 'NoSuchBucket', 'Bucket not found', pathname);
+        }
+        const all = (await walkObjects(bucketDir, bucket)).filter((item) =>
+          item.key.startsWith(prefix),
+        );
+        const filtered = marker ? all.filter((item) => item.key > marker) : all;
+        const page = filtered.slice(0, maxKeys);
+        const isTruncated = filtered.length > page.length;
+        const commonPrefixes = new Set<string>();
+        const contents: ObjectRow[] = [];
+        for (const item of page) {
+          if (delimiter) {
+            const rest = item.key.slice(prefix.length);
+            const idx = rest.indexOf(delimiter);
+            if (idx >= 0) {
+              commonPrefixes.add(item.key.slice(0, prefix.length + idx + delimiter.length));
+              continue;
+            }
+          }
+          contents.push(item);
+        }
+        return xmlResponse(
+          xmlDocument({
+            name: 'ListBucketResult',
+            attributes: { xmlns: S3_XMLNS },
+            children: [
+              { name: 'Name', value: bucket },
+              { name: 'Prefix', value: prefix },
+              { name: 'Marker', value: marker },
+              { name: 'MaxKeys', value: String(maxKeys) },
+              { name: 'IsTruncated', value: String(isTruncated) },
+              ...contents.map((item) => ({
+                name: 'Contents',
+                children: [
+                  { name: 'Key', value: item.key },
+                  { name: 'LastModified', value: item.mtime },
+                  { name: 'ETag', value: item.md5 ? `"${item.md5}"` : '' },
+                  { name: 'Size', value: String(item.size) },
+                  { name: 'StorageClass', value: 'STANDARD' },
+                ],
+              })),
+              ...[...commonPrefixes]
+                .sort((a, b) => a.localeCompare(b))
+                .map((prefixValue) => ({
+                  name: 'CommonPrefixes',
+                  children: [{ name: 'Prefix', value: prefixValue }],
+                })),
+              ...(isTruncated
+                ? [{ name: 'NextMarker', value: page[page.length - 1]?.key ?? '' }]
+                : []),
+            ],
+          }),
+        );
+      }
       return s3Err(set, 405, 'MethodNotAllowed', 'Method not allowed', pathname);
     }
 
@@ -500,7 +567,13 @@ function createS3Handler() {
         ETag: etag,
       };
       if (request.method === 'HEAD') {
-        return new Response(null, { status: 200, headers });
+        return new Response(Bun.file(opened.path), {
+          status: 200,
+          headers: {
+            ...headers,
+            'Last-Modified': new Date(opened.stat.mtimeMs).toUTCString(),
+          },
+        });
       }
       const range = request.headers.get('range');
       if (range) {
