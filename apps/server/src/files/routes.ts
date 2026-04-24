@@ -283,7 +283,9 @@ export const filesRoutes = new Elysia({ name: 'files' })
       }
       try {
         await removeFolder(path);
-        await db.delete(fileIndex).where(sql`${fileIndex.path} = ${path} OR ${fileIndex.path} LIKE ${path + '/%'}`);
+        await db
+          .delete(fileIndex)
+          .where(sql`${fileIndex.path} = ${path} OR ${fileIndex.path} LIKE ${`${path}/%`}`);
         broadcastFilesChanged();
         return { ok: true as const };
       } catch (err) {

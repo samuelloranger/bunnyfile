@@ -905,7 +905,15 @@ function DirectoryRow({
           </Button>
         ) : (
           <div className="flex items-center justify-end gap-1">
-            <Button variant="ghost" size="icon-sm" aria-label="Open folder" onClick={(e) => { e.stopPropagation(); onNavigate(entry.path); }}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Open folder"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate(entry.path);
+              }}
+            >
               <ChevronRight />
             </Button>
             <DropdownMenu>
