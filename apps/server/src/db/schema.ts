@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * Auth schema — matches better-auth's required shape for the Drizzle adapter.
@@ -142,3 +142,70 @@ export const shareLink = sqliteTable(
 );
 
 export type ShareLinkRow = typeof shareLink.$inferSelect;
+
+export const s3Object = sqliteTable(
+  's3_object',
+  {
+    path: text('path').primaryKey(),
+    bucket: text('bucket').notNull(),
+    key: text('key').notNull(),
+    size: integer('size').notNull(),
+    mtimeMs: integer('mtime_ms').notNull(),
+    inode: integer('inode').notNull(),
+    md5: text('md5').notNull(),
+  },
+  (t) => [index('s3_object_bucket_idx').on(t.bucket)],
+);
+
+export type S3ObjectRow = typeof s3Object.$inferSelect;
+
+export const s3MultipartUpload = sqliteTable(
+  's3_multipart_upload',
+  {
+    uploadId: text('upload_id').primaryKey(),
+    bucket: text('bucket').notNull(),
+    key: text('key').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (t) => [index('s3_mpu_bucket_key_idx').on(t.bucket, t.key)],
+);
+
+export const s3MultipartPart = sqliteTable(
+  's3_multipart_part',
+  {
+    uploadId: text('upload_id')
+      .notNull()
+      .references(() => s3MultipartUpload.uploadId, { onDelete: 'cascade' }),
+    partNumber: integer('part_number').notNull(),
+    size: integer('size').notNull(),
+    md5: text('md5').notNull(),
+    path: text('path').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.uploadId, t.partNumber] })],
+);
+
+export const s3AccessKey = sqliteTable(
+  's3_access_key',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    accessKeyId: text('access_key_id').notNull().unique(),
+    secretKeyEncrypted: text('secret_key_encrypted').notNull(),
+    name: text('name').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (t) => [
+    index('s3_access_key_user_id_idx').on(t.userId),
+    index('s3_access_key_access_key_id_idx').on(t.accessKeyId),
+  ],
+);
+
+export type S3MultipartUploadRow = typeof s3MultipartUpload.$inferSelect;
+export type S3MultipartPartRow = typeof s3MultipartPart.$inferSelect;
+export type S3AccessKeyRow = typeof s3AccessKey.$inferSelect;

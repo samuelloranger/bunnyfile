@@ -36,12 +36,13 @@ export function absFromRelOrThrow(raw: string): string {
 export async function writeUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
-): Promise<{ size: number; sha256: string; mtimeMs: number; inode: number }> {
+): Promise<{ size: number; sha256: string; md5: string; mtimeMs: number; inode: number }> {
   const destination = absFromRelOrThrow(rel);
   await mkdir(dirname(destination), { recursive: true });
 
   const tmp = `${destination}.tmp-${crypto.randomUUID().slice(0, 8)}`;
-  const hash = createHash('sha256');
+  const sha256Hash = createHash('sha256');
+  const md5Hash = createHash('md5');
   let size = 0;
 
   const writer = Bun.file(tmp).writer();
@@ -51,7 +52,8 @@ export async function writeUpload(
       const { done, value } = await reader.read();
       if (done) break;
       if (value) {
-        hash.update(value);
+        sha256Hash.update(value);
+        md5Hash.update(value);
         size += value.byteLength;
         writer.write(value);
       }
@@ -70,7 +72,8 @@ export async function writeUpload(
   const st = await stat(destination);
   return {
     size,
-    sha256: hash.digest('hex'),
+    sha256: sha256Hash.digest('hex'),
+    md5: md5Hash.digest('hex'),
     mtimeMs: Math.round(st.mtimeMs),
     inode: Number(st.ino),
   };
@@ -180,10 +183,13 @@ export async function listImmediateDirectories(relPrefix: string): Promise<strin
 }
 
 /** Hash an existing on-disk file (used by the scanner for lazy backfill). */
-export async function hashOnDisk(rel: string): Promise<string> {
+export async function hashOnDisk(
+  rel: string,
+  algorithm: 'sha256' | 'md5' = 'sha256',
+): Promise<string> {
   const path = absFromRelOrThrow(rel);
   const node = createReadStream(path);
-  const h = createHash('sha256');
+  const h = createHash(algorithm);
   for await (const chunk of node) {
     h.update(chunk);
   }

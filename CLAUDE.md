@@ -51,7 +51,7 @@ packages/
 ## Stack
 
 - **Runtime:** Bun ≥ 1.3. Use `bun:sqlite` natively, no ORM — raw SQL with a migration runner.
-- **Backend:** TypeScript + Elysia + `@tus/server` (wrap in a thin Elysia adapter when Phase 3 lands). Typed API surface consumed by the web app via Elysia **Eden** (`treaty<App>`). Tests via `bun:test`.
+- **Backend:** TypeScript + Elysia. Typed API surface consumed by the web app via Elysia **Eden** (`treaty<App>`). Tests via `bun:test`.
 - **Frontend:** React 19 + Vite 8 + TanStack Router (SPA mode, file-based routes) + TanStack Query + Tailwind CSS v4.
 - **No component library yet.** We deliberately skipped shadcn/ui at Phase 0 to keep the door open for a custom visual language. When complex primitives are needed (dialogs, command palette, dropdowns), evaluate Radix/Ark/bespoke and commit the chosen primitives into the repo.
 - **Lint/format:** Biome (`bun run lint` / `lint:fix`). Tailwind directives in CSS are enabled in `biome.json`.
@@ -65,7 +65,7 @@ packages/
 
 ## Phase gating
 
-Each phase in `PLAN.md` §4 must leave BunnyFile runnable and dogfoodable — never ship a broken mid-state. Each phase has an explicit "Done when" criterion; don't claim a phase is complete until that criterion is met. Sequence: Phase 0 (✅ foundation) → 1 (file ops) → 2 (auth + shares) → 3 (tus) → 4 (S3) → 5 (launch polish).
+Each phase in `PLAN.md` §4 must leave BunnyFile runnable and dogfoodable — never ship a broken mid-state. Each phase has an explicit "Done when" criterion; don't claim a phase is complete until that criterion is met. Sequence: Phase 0 (✅ foundation) → 1 (file ops) → 2 (auth + shares) → 3 (upload UX + progress) → 4 (S3) → 5 (launch polish).
 
 ## Commands
 
