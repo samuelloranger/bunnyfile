@@ -46,7 +46,13 @@ function uriEncodeSegment(segment: string): string {
 }
 
 function canonicalUri(pathname: string): string {
-  const parts = pathname.split('/').map(uriEncodeSegment);
+  const parts = pathname.split('/').map((seg) => {
+    try {
+      return uriEncodeSegment(decodeURIComponent(seg));
+    } catch {
+      return uriEncodeSegment(seg);
+    }
+  });
   return parts.join('/') || '/';
 }
 

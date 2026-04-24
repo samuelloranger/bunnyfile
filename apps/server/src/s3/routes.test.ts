@@ -41,12 +41,18 @@ function canonicalUriPath(pathname: string): string {
   return (
     pathname
       .split('/')
-      .map((seg) =>
-        encodeURIComponent(seg).replace(
+      .map((seg) => {
+        let decoded: string;
+        try {
+          decoded = decodeURIComponent(seg);
+        } catch {
+          decoded = seg;
+        }
+        return encodeURIComponent(decoded).replace(
           /[!'()*]/g,
           (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-        ),
-      )
+        );
+      })
       .join('/') || '/'
   );
 }
