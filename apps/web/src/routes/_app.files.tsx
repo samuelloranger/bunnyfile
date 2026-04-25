@@ -979,6 +979,18 @@ function FileRow({
   const draggableId = dndId('file', entry.path);
   const { ref: dragRef, isDragging } = useDraggable({ id: draggableId });
   const downloadHref = `/api/files/content?path=${encodeURIComponent(entry.path)}`;
+  const isThumbnailable = entry.mime.startsWith('image/') || entry.mime === 'application/pdf';
+  const regenThumb = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to regenerate thumbnail');
+    },
+    onSuccess: () => toast.success('Thumbnail regenerated'),
+    onError: () => toast.error('Could not regenerate thumbnail'),
+  });
   return (
     <tr
       ref={dragRef}
@@ -992,12 +1004,15 @@ function FileRow({
       <Td>
         <div className="flex items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">
-            {entry.mime.startsWith('image/') ? (
+            {entry.mime.startsWith('image/') || entry.mime === 'application/pdf' ? (
               <img
-                src={`/api/files/content?path=${encodeURIComponent(entry.path)}`}
+                src={`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}`}
                 alt=""
                 loading="lazy"
                 className="size-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
               />
             ) : (
               iconFor(entry.mime, entry.name)
@@ -1034,7 +1049,12 @@ function FileRow({
           </Tooltip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${entry.name}`}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`More actions for ${entry.name}`}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
                 <MoreHorizontal />
               </Button>
             </DropdownMenuTrigger>
@@ -1066,6 +1086,15 @@ function FileRow({
               >
                 <Pencil /> Rename
               </DropdownMenuItem>
+              {isThumbnailable && (
+                <DropdownMenuItem
+                  onSelect={(e) => e.preventDefault()}
+                  onClick={() => regenThumb.mutate()}
+                  disabled={regenThumb.isPending}
+                >
+                  <RefreshCw /> Regenerate thumbnail
+                </DropdownMenuItem>
+              )}
               <ConfirmDialog
                 trigger={
                   <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>

@@ -21,6 +21,7 @@ export const storageUsageQuery = () =>
   });
 
 export function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
   let value = bytes / 1024;

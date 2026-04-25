@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { APP_NAME, type HealthStatus } from '@bunnyfile/shared';
 import { cors } from '@elysiajs/cors';
+import { swagger } from '@elysiajs/swagger';
 import { count } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from './auth/auth';
@@ -12,6 +13,7 @@ import { user } from './db/schema';
 import { filesCron } from './files/cron';
 import { filesRoutes } from './files/routes';
 import { filesWatcher } from './files/watcher';
+import { drainUploads } from './inflight';
 import { accessKeyRoutes } from './s3/access-keys';
 import { s3Routes } from './s3/routes';
 import { sharesRoutes } from './shares/routes';
@@ -24,6 +26,21 @@ const WEB_DIST = resolve(import.meta.dir, '../../web/dist');
 const INDEX_HTML = join(WEB_DIST, 'index.html');
 
 export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
+  .use(
+    swagger({
+      path: '/api/docs',
+      documentation: {
+        info: { title: 'BunnyFile API', version },
+        tags: [
+          { name: 'files', description: 'File operations' },
+          { name: 'shares', description: 'Share links' },
+          { name: 'users', description: 'User management' },
+          { name: 'settings', description: 'Settings and access keys' },
+        ],
+      },
+      exclude: [/^\/api\/s3/, /^\/api\/auth/],
+    }),
+  )
   .use(
     cors({
       // Accept localhost / RFC1918 / env-allowed origins (see auth/origins.ts).
@@ -98,7 +115,17 @@ if (import.meta.main) {
 
   const port = Number(Bun.env.SERVER_PORT ?? 3901);
   const host = Bun.env.SERVER_HOST ?? '0.0.0.0';
-  app.listen({ port, hostname: host }, ({ hostname, port: p }) => {
+  const server = app.listen({ port, hostname: host }, ({ hostname, port: p }) => {
     console.log(`${APP_NAME} server ready on http://${hostname}:${p}`);
   });
+
+  const shutdown = async () => {
+    console.log('[shutdown] stopping server...');
+    server.stop();
+    await drainUploads();
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
