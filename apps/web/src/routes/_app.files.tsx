@@ -994,10 +994,13 @@ function FileRow({
           <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">
             {entry.mime.startsWith('image/') ? (
               <img
-                src={`/api/files/content?path=${encodeURIComponent(entry.path)}`}
+                src={`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}`}
                 alt=""
                 loading="lazy"
                 className="size-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
               />
             ) : (
               iconFor(entry.mime, entry.name)

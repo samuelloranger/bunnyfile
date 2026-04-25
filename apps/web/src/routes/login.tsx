@@ -21,6 +21,7 @@ function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   if (setup.isLoading || session.isPending) return null;
   if (setup.data?.needsSetup) return <Navigate to="/setup" />;
@@ -79,8 +80,71 @@ function LoginPage() {
           <Button type="submit" className="w-full" size="lg" loading={pending}>
             Sign in
           </Button>
+
+          <button
+            type="button"
+            className="w-full text-center text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
+            onClick={() => setShowForgot((v) => !v)}
+          >
+            Forgot password?
+          </button>
+
+          {showForgot && <ForgotPasswordForm prefillEmail={email} />}
         </form>
       </AuthCard>
     </AuthShell>
+  );
+}
+
+function ForgotPasswordForm({ prefillEmail }: { prefillEmail: string }) {
+  const [resetEmail, setResetEmail] = useState(prefillEmail);
+  const [status, setStatus] = useState<'idle' | 'pending' | 'done' | 'err'>('idle');
+
+  async function handleReset(e: FormEvent) {
+    e.preventDefault();
+    setStatus('pending');
+    try {
+      const res = await fetch('/api/users/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail }),
+        credentials: 'include',
+      });
+      setStatus(res.ok ? 'done' : 'err');
+    } catch {
+      setStatus('err');
+    }
+  }
+
+  if (status === 'done') {
+    return (
+      <p className="rounded-md border border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--success))]">
+        If that account exists, a new password has been printed to the server logs.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-3">
+      <p className="text-xs text-[hsl(var(--muted-foreground))]">
+        A new random password will be printed to the server logs. Ask your admin to check them.
+      </p>
+      <form onSubmit={handleReset} className="flex gap-2">
+        <Input
+          type="email"
+          required
+          value={resetEmail}
+          onChange={(e) => setResetEmail(e.currentTarget.value)}
+          placeholder="your@email.com"
+          className="flex-1"
+        />
+        <Button type="submit" size="sm" loading={status === 'pending'} variant="outline">
+          Reset
+        </Button>
+      </form>
+      {status === 'err' && (
+        <p className="text-xs text-[hsl(var(--destructive))]">Something went wrong.</p>
+      )}
+    </div>
   );
 }

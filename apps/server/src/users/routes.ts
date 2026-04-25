@@ -2,7 +2,7 @@ import { asc, count, eq } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth/auth';
 import { db } from '../db';
-import { user } from '../db/schema';
+import { account, user } from '../db/schema';
 
 type Role = 'admin' | 'user';
 
@@ -163,5 +163,77 @@ export const usersRoutes = new Elysia({ name: 'users' })
     },
     {
       params: t.Object({ id: t.String() }),
+    },
+  )
+
+  // Forgot password — generates a random password, updates the DB, and logs
+  // it to stdout so the admin can read it from container logs.
+  .post(
+    '/api/users/forgot-password',
+    async ({ body }) => {
+      const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, body.email));
+      if (!row) {
+        // Don't reveal whether the email exists.
+        return { ok: true as const };
+      }
+
+      const newPassword = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+      const hash = await Bun.password.hash(newPassword, { algorithm: 'argon2id' });
+
+      await db.update(account).set({ password: hash }).where(eq(account.userId, row.id));
+
+      console.log(`[forgot-password] reset for ${body.email} — new password: ${newPassword}`);
+      return { ok: true as const };
+    },
+    {
+      body: t.Object({ email: t.String({ format: 'email' }) }),
+    },
+  )
+
+  // Change own email — requires current password for confirmation.
+  .put(
+    '/api/users/me/email',
+    async ({ request, body, set }) => {
+      const s = await callerFromRequest(request);
+      if (!s?.user) {
+        set.status = 401;
+        return { error: 'unauthorized' as const };
+      }
+
+      const cred = db
+        .select({ password: account.password })
+        .from(account)
+        .where(eq(account.userId, s.user.id))
+        .get();
+
+      if (!cred?.password) {
+        set.status = 400;
+        return { error: 'no password credential found' as const };
+      }
+
+      const valid = await Bun.password.verify(body.currentPassword, cred.password);
+      if (!valid) {
+        set.status = 400;
+        return { error: 'incorrect password' as const };
+      }
+
+      const conflict = db
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.email, body.newEmail))
+        .get();
+      if (conflict && conflict.id !== s.user.id) {
+        set.status = 409;
+        return { error: 'email already in use' as const };
+      }
+
+      await db.update(user).set({ email: body.newEmail }).where(eq(user.id, s.user.id));
+      return { ok: true as const };
+    },
+    {
+      body: t.Object({
+        currentPassword: t.String({ minLength: 1 }),
+        newEmail: t.String({ format: 'email' }),
+      }),
     },
   );

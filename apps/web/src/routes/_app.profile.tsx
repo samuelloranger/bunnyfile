@@ -62,6 +62,7 @@ function ProfilePage() {
       </header>
 
       <ProfileCard />
+      <EmailCard />
       <PasswordCard />
       <SessionsCard currentSessionId={session.data?.session?.id} />
     </div>
@@ -99,7 +100,7 @@ function ProfileCard() {
             maxLength={120}
           />
         </Field>
-        <Field label="Email" htmlFor="email" hint="Email changes are not supported yet.">
+        <Field label="Email" htmlFor="email">
           <Input id="email" value={user?.email ?? ''} disabled readOnly />
         </Field>
         <Field
@@ -118,6 +119,80 @@ function ProfileCard() {
         <StatusLine status={status} />
         <div className="flex justify-end">
           <Button type="submit">Save changes</Button>
+        </div>
+      </form>
+    </SectionCard>
+  );
+}
+
+function EmailCard() {
+  const session = authClient.useSession();
+  const [password, setPassword] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [status, setStatus] = useState<FormStatus>({ kind: 'idle' });
+  const [pending, setPending] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setStatus({ kind: 'idle' });
+    setPending(true);
+    try {
+      const res = await fetch('/api/users/me/email', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: password, newEmail }),
+        credentials: 'include',
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setStatus({
+          kind: 'err',
+          msg: (json as { error: string }).error ?? 'Could not update email',
+        });
+        return;
+      }
+      await session.refetch();
+      setPassword('');
+      setNewEmail('');
+      setStatus({ kind: 'ok', msg: 'Email updated successfully' });
+    } catch {
+      setStatus({ kind: 'err', msg: 'Network error' });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Email address"
+      description="Confirm your current password to change your email."
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="New email" htmlFor="new-email">
+          <Input
+            id="new-email"
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.currentTarget.value)}
+            required
+          />
+        </Field>
+        <Field label="Current password" htmlFor="email-password">
+          <Input
+            id="email-password"
+            type="password"
+            autoComplete="current-password"
+            leftIcon={<KeyRound />}
+            value={password}
+            onChange={(e) => setPassword(e.currentTarget.value)}
+            required
+          />
+        </Field>
+        <StatusLine status={status} />
+        <div className="flex justify-end">
+          <Button type="submit" loading={pending}>
+            Change email
+          </Button>
         </div>
       </form>
     </SectionCard>

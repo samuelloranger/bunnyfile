@@ -3,12 +3,13 @@ import { desc, eq, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth/auth';
 import { db } from '../db';
-import { fileIndex } from '../db/schema';
+import { fileIndex, thumbnail } from '../db/schema';
 import { addSseClient, broadcastFilesChanged, removeSseClient } from './events';
 import { mimeFromName } from './mime';
 import { basenameOf, safeRelPath } from './paths';
 import { scan } from './scanner';
 import {
+  absFromRelOrThrow,
   createFolder,
   DATA_ROOT,
   listImmediateDirectories,
@@ -20,6 +21,7 @@ import {
   removeFolder,
   writeUpload,
 } from './store';
+import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
 
 type FileEntry = {
   kind: 'file';
@@ -403,6 +405,9 @@ export const filesRoutes = new Elysia({ name: 'files' })
           });
         }
         broadcastFilesChanged();
+        if (isThumbnailable(mime)) {
+          generateAndStoreThumbnail(absFromRelOrThrow(target), target).catch(() => {});
+        }
         return {
           path: target,
           size: info.size,
@@ -500,6 +505,31 @@ export const filesRoutes = new Elysia({ name: 'files' })
     {
       query: t.Object({ path: t.String() }),
     },
+  )
+
+  .get(
+    '/api/files/thumbnail',
+    async ({ request, query, set }) => {
+      const s = await callerFromRequest(request);
+      if (!s?.user) {
+        set.status = 401;
+        return new Response('unauthorized', { status: 401 });
+      }
+      const rel = safeRelPath(query.path);
+      if (!rel) {
+        set.status = 400;
+        return new Response('invalid path', { status: 400 });
+      }
+      const row = db.select().from(thumbnail).where(eq(thumbnail.path, rel)).get();
+      if (!row) {
+        set.status = 404;
+        return new Response('no thumbnail', { status: 404 });
+      }
+      return new Response(row.data as unknown as ArrayBuffer, {
+        headers: { 'Content-Type': 'image/webp', 'Cache-Control': 'max-age=86400' },
+      });
+    },
+    { query: t.Object({ path: t.String() }) },
   )
 
   .patch(

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { blob, index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * Auth schema — matches better-auth's required shape for the Drizzle adapter.
@@ -209,3 +209,14 @@ export const s3AccessKey = sqliteTable(
 export type S3MultipartUploadRow = typeof s3MultipartUpload.$inferSelect;
 export type S3MultipartPartRow = typeof s3MultipartPart.$inferSelect;
 export type S3AccessKeyRow = typeof s3AccessKey.$inferSelect;
+
+export const thumbnail = sqliteTable('thumbnail', {
+  path: text('path')
+    .primaryKey()
+    .references(() => fileIndex.path, { onDelete: 'cascade' }),
+  data: blob('data', { mode: 'buffer' }).notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+});
+
+export type ThumbnailRow = typeof thumbnail.$inferSelect;
