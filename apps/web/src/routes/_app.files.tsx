@@ -1049,7 +1049,12 @@ function FileRow({
           </Tooltip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${entry.name}`}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`More actions for ${entry.name}`}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
                 <MoreHorizontal />
               </Button>
             </DropdownMenuTrigger>
