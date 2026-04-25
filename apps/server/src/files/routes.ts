@@ -190,9 +190,10 @@ export const filesRoutes = new Elysia({ name: 'files' })
     let freeBytes: number | null = null;
     try {
       const fs = await statfs(DATA_ROOT);
-      const blockSize = Number(fs.bsize);
-      totalBytes = blockSize * Number(fs.blocks);
-      freeBytes = blockSize * Number(fs.bavail);
+      const rawTotal = fs.bsize * fs.blocks;
+      const rawFree = fs.bsize * fs.bavail;
+      totalBytes = rawTotal > 0 ? rawTotal : null;
+      freeBytes = rawFree >= 0 ? rawFree : null;
     } catch {
       // Best-effort: some filesystems may not support statfs.
     }
