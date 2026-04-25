@@ -532,6 +532,38 @@ export const filesRoutes = new Elysia({ name: 'files' })
     { query: t.Object({ path: t.String() }) },
   )
 
+  .post(
+    '/api/files/thumbnail',
+    async ({ request, query, set }) => {
+      const s = await callerFromRequest(request);
+      if (!s?.user) {
+        set.status = 401;
+        return { error: 'unauthorized' as const };
+      }
+      const rel = safeRelPath(query.path);
+      if (!rel) {
+        set.status = 400;
+        return { error: 'invalid path' as const };
+      }
+      const row = await db
+        .select({ mime: fileIndex.mime })
+        .from(fileIndex)
+        .where(eq(fileIndex.path, rel));
+      if (!row[0]) {
+        set.status = 404;
+        return { error: 'file not found' as const };
+      }
+      const { mime } = row[0];
+      if (!isThumbnailable(mime)) {
+        set.status = 400;
+        return { error: 'not thumbnailable' as const };
+      }
+      await generateAndStoreThumbnail(absFromRelOrThrow(rel), rel, mime);
+      return { ok: true as const };
+    },
+    { query: t.Object({ path: t.String() }) },
+  )
+
   .patch(
     '/api/files',
     async ({ request, body, set }) => {

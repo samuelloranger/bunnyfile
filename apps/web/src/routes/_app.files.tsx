@@ -979,6 +979,18 @@ function FileRow({
   const draggableId = dndId('file', entry.path);
   const { ref: dragRef, isDragging } = useDraggable({ id: draggableId });
   const downloadHref = `/api/files/content?path=${encodeURIComponent(entry.path)}`;
+  const isThumbnailable = entry.mime.startsWith('image/') || entry.mime === 'application/pdf';
+  const regenThumb = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to regenerate thumbnail');
+    },
+    onSuccess: () => toast.success('Thumbnail regenerated'),
+    onError: () => toast.error('Could not regenerate thumbnail'),
+  });
   return (
     <tr
       ref={dragRef}
@@ -1069,6 +1081,15 @@ function FileRow({
               >
                 <Pencil /> Rename
               </DropdownMenuItem>
+              {isThumbnailable && (
+                <DropdownMenuItem
+                  onSelect={(e) => e.preventDefault()}
+                  onClick={() => regenThumb.mutate()}
+                  disabled={regenThumb.isPending}
+                >
+                  <RefreshCw /> Regenerate thumbnail
+                </DropdownMenuItem>
+              )}
               <ConfirmDialog
                 trigger={
                   <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
