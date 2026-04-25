@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { s3MultipartPart, s3MultipartUpload, s3Object } from '../db/schema';
 import { absFromRelOrThrow, DATA_ROOT } from '../files/store';
+import { trackUpload } from '../inflight';
 import { s3ErrorXml, xmlDocument } from './xml';
 
 const MULTIPART_DIR = resolve(DATA_ROOT, '.multipart');
@@ -330,7 +331,7 @@ export async function handleMultipart(
   }
 
   if (method === 'POST' && uploadId) {
-    return completeMultipartUpload(request, set, bucket, key, uploadId, url.pathname);
+    return trackUpload(completeMultipartUpload(request, set, bucket, key, uploadId, url.pathname));
   }
 
   if (method === 'DELETE' && uploadId) return abortMultipartUpload(set, uploadId);

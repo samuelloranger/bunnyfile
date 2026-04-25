@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { trackUpload } from '../inflight';
 import { resolveInRoot, safeRelPath } from './paths';
 
 const DEFAULT_ROOT = resolve(import.meta.dir, '../../data/files');
@@ -33,7 +34,14 @@ export function absFromRelOrThrow(raw: string): string {
   return abs(rel);
 }
 
-export async function writeUpload(
+export function writeUpload(
+  rel: string,
+  stream: ReadableStream<Uint8Array>,
+): Promise<{ size: number; sha256: string; md5: string; mtimeMs: number; inode: number }> {
+  return trackUpload(doWriteUpload(rel, stream));
+}
+
+async function doWriteUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
 ): Promise<{ size: number; sha256: string; md5: string; mtimeMs: number; inode: number }> {
