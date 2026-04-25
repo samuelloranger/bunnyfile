@@ -1,8 +1,12 @@
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import sharp from 'sharp';
 import { db } from '../db';
 import { thumbnail } from '../db/schema';
 
 const THUMB_SIZE = 256;
+
 const IMAGE_MIMES = new Set([
   'image/jpeg',
   'image/png',
@@ -13,11 +17,31 @@ const IMAGE_MIMES = new Set([
 ]);
 
 export function isThumbnailable(mime: string): boolean {
-  return IMAGE_MIMES.has(mime);
+  return IMAGE_MIMES.has(mime) || mime === 'application/pdf';
 }
 
-export async function generateAndStoreThumbnail(absPath: string, rel: string): Promise<void> {
-  const buf = await sharp(absPath)
+async function pdfToBuffer(absPath: string): Promise<Buffer> {
+  const tmp = join(tmpdir(), `bunnyfile-thumb-${crypto.randomUUID().slice(0, 8)}`);
+  const proc = Bun.spawn(
+    ['pdftoppm', '-png', '-r', '72', '-f', '1', '-l', '1', '-singlefile', absPath, tmp],
+    { stderr: 'pipe' },
+  );
+  const exit = await proc.exited;
+  if (exit !== 0) throw new Error(`pdftoppm exited with code ${exit}`);
+  const pngPath = `${tmp}.png`;
+  const data = await Bun.file(pngPath).arrayBuffer();
+  await rm(pngPath, { force: true });
+  return Buffer.from(data);
+}
+
+export async function generateAndStoreThumbnail(
+  absPath: string,
+  rel: string,
+  mime: string,
+): Promise<void> {
+  const source = mime === 'application/pdf' ? await pdfToBuffer(absPath) : absPath;
+
+  const buf = await sharp(source)
     .resize(THUMB_SIZE, THUMB_SIZE, { fit: 'cover', position: 'attention' })
     .webp({ quality: 80 })
     .toBuffer();

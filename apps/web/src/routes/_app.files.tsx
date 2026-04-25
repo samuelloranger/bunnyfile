@@ -992,7 +992,7 @@ function FileRow({
       <Td>
         <div className="flex items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">
-            {entry.mime.startsWith('image/') ? (
+            {entry.mime.startsWith('image/') || entry.mime === 'application/pdf' ? (
               <img
                 src={`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}`}
                 alt=""

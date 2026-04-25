@@ -406,7 +406,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         }
         broadcastFilesChanged();
         if (isThumbnailable(mime)) {
-          generateAndStoreThumbnail(absFromRelOrThrow(target), target).catch(() => {});
+          generateAndStoreThumbnail(absFromRelOrThrow(target), target, mime).catch(() => {});
         }
         return {
           path: target,

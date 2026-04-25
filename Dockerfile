@@ -13,6 +13,7 @@ COPY . .
 RUN cd apps/web && bun run build
 
 FROM oven/bun:1.3-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ARG APP_VERSION=0.0.1
 ENV NODE_ENV=production
