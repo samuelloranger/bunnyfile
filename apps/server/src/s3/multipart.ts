@@ -6,6 +6,7 @@ import { db } from '../db';
 import { s3MultipartPart, s3MultipartUpload, s3Object } from '../db/schema';
 import { absFromRelOrThrow, DATA_ROOT } from '../files/store';
 import { trackUpload } from '../inflight';
+import { bodyStream } from './chunked';
 import { s3ErrorXml, xmlDocument } from './xml';
 
 const MULTIPART_DIR = resolve(DATA_ROOT, '.multipart');
@@ -127,11 +128,7 @@ async function uploadPart(
     .get();
   if (!upload) return s3Err(set, 404, 'NoSuchUpload', 'Upload not found', uploadId);
 
-  const { size, md5, path } = await writePart(
-    uploadId,
-    partNumber,
-    request.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() }),
-  );
+  const { size, md5, path } = await writePart(uploadId, partNumber, bodyStream(request));
   db.delete(s3MultipartPart)
     .where(and(eq(s3MultipartPart.uploadId, uploadId), eq(s3MultipartPart.partNumber, partNumber)))
     .run();
