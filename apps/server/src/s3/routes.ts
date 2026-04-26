@@ -15,6 +15,7 @@ import {
   writeUpload,
 } from '../files/store';
 import { lookupS3SecretKey } from './access-keys';
+import { bodyStream } from './chunked';
 import { handleMultipart } from './multipart';
 import { verifyPresigned, verifySigV4 } from './sigv4';
 import { s3ErrorXml, xmlDocument } from './xml';
@@ -506,10 +507,7 @@ function createS3Handler() {
       let result: { size: number; md5: string; mtimeMs: number; inode: number };
       try {
         await mkdir(resolve(S3_ROOT, bucket), { recursive: true });
-        result = await writeUpload(
-          rel,
-          request.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() }),
-        );
+        result = await writeUpload(rel, bodyStream(request));
       } catch (err) {
         return s3Err(
           set,
