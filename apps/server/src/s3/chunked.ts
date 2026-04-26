@@ -12,7 +12,9 @@ function concat(a: Uint8Array<ArrayBuffer>, b: Uint8Array<ArrayBuffer>): Uint8Ar
  * Needed because Caddy proxies HTTP/2 client requests to BunnyFile's HTTP/1.1
  * backend using chunked encoding, which Bun does not transparently decode.
  */
-export function decodeChunkedStream(stream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+export function decodeChunkedStream(
+  stream: ReadableStream<Uint8Array>,
+): ReadableStream<Uint8Array> {
   const reader = stream.getReader();
   let buf: Uint8Array<ArrayBuffer> = new Uint8Array(0);
   let closed = false;
@@ -46,7 +48,10 @@ export function decodeChunkedStream(stream: ReadableStream<Uint8Array>): Readabl
           // read until we can find a \r\n for the chunk-size line
           let crlfPos = findCRLF();
           while (crlfPos < 0) {
-            if (!(await fill())) { controller.close(); return; }
+            if (!(await fill())) {
+              controller.close();
+              return;
+            }
             crlfPos = findCRLF();
           }
 
