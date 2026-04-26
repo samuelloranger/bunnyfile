@@ -14,6 +14,7 @@ import {
   removeFile,
   writeUpload,
 } from '../files/store';
+import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { lookupS3SecretKey } from './access-keys';
 import { bodyStream } from './chunked';
 import { handleMultipart } from './multipart';
@@ -537,6 +538,10 @@ function createS3Handler() {
             md5: result.md5,
           },
         });
+      const mime = mimeFromName(basenameOf(key));
+      if (isThumbnailable(mime)) {
+        generateAndStoreThumbnail(resolve(DATA_ROOT, rel), rel, mime).catch(() => {});
+      }
       return new Response(null, {
         status: 200,
         headers: { ETag: `"${result.md5}"` },

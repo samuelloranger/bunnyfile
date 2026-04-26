@@ -4,7 +4,10 @@ import { dirname, resolve } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { s3MultipartPart, s3MultipartUpload, s3Object } from '../db/schema';
+import { mimeFromName } from '../files/mime';
+import { basenameOf } from '../files/paths';
 import { absFromRelOrThrow, DATA_ROOT } from '../files/store';
+import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { trackUpload } from '../inflight';
 import { bodyStream } from './chunked';
 import { s3ErrorXml, xmlDocument } from './xml';
@@ -221,6 +224,11 @@ async function completeMultipartUpload(
         md5: etagValue,
       },
     });
+
+  const mime = mimeFromName(basenameOf(key));
+  if (isThumbnailable(mime)) {
+    generateAndStoreThumbnail(destAbs, destRel, mime).catch(() => {});
+  }
 
   for (const part of dbParts) {
     await rm(part.path, { force: true }).catch(() => {});
