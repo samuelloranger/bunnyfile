@@ -1,0 +1,12 @@
+# Replace DOMAIN with your hostname (e.g. files.example.com).
+# This file is used by tinyauth.yml.
+DOMAIN {
+	encode gzip zstd
+
+	forward_auth tinyauth:3000 {
+		uri /api/auth/caddy
+		copy_headers Remote-User Remote-Email Remote-Name Remote-Groups
+	}
+
+	reverse_proxy bunnyfile:3001
+}

@@ -46,6 +46,27 @@ export const filesQuery = (prefix: string, offset = 0, limit = 200) =>
     staleTime: 5_000,
   });
 
+export type SearchResult = {
+  path: string;
+  name: string;
+  size: number;
+  mime: string;
+  mtimeMs: number;
+};
+
+export const filesSearchQuery = (q: string, limit = 50) =>
+  queryOptions({
+    queryKey: ['files-search', q, limit],
+    queryFn: async () => {
+      const { data, error } = await api.api.files.search.get({ query: { q, limit } });
+      if (error) throw error;
+      if ('error' in data) throw new Error(data.error);
+      return data as { query: string; entries: SearchResult[] };
+    },
+    enabled: q.trim().length >= 2,
+    staleTime: 3_000,
+  });
+
 export function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];

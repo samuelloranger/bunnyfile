@@ -99,6 +99,32 @@ describe('files routes', () => {
 
     const deletedReadRes = await request('/api/files/content?path=docs/hello.txt');
     expect(deletedReadRes.status).toBe(404);
+
+    const trashRes = await request('/api/trash');
+    expect(trashRes.status).toBe(200);
+    const trash = (await trashRes.json()) as {
+      entries: Array<{ id: string; originalPath: string }>;
+    };
+    const trashed = trash.entries.find((entry) => entry.originalPath === 'docs/hello.txt');
+    expect(trashed).toBeTruthy();
+
+    const restoreRes = await request(`/api/trash/${trashed!.id}/restore`, { method: 'POST' });
+    expect(restoreRes.status).toBe(200);
+
+    const restoredReadRes = await request('/api/files/content?path=docs/hello.txt');
+    expect(restoredReadRes.status).toBe(200);
+    expect(await restoredReadRes.text()).toBe('hello world');
+
+    const deleteFolderViaFileEndpointRes = await request('/api/files', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'docs' }),
+    });
+    expect(deleteFolderViaFileEndpointRes.status).toBe(400);
+
+    const stillRestoredReadRes = await request('/api/files/content?path=docs/hello.txt');
+    expect(stillRestoredReadRes.status).toBe(200);
+    expect(await stillRestoredReadRes.text()).toBe('hello world');
   });
 
   it('returns usage, recent, and rescan payloads', async () => {

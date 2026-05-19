@@ -1,0 +1,5 @@
+# Replace DOMAIN with your hostname (e.g. files.example.com)
+DOMAIN {
+	encode gzip zstd
+	reverse_proxy bunnyfile:3001
+}

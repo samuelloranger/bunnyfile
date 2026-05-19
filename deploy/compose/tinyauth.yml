@@ -1,0 +1,58 @@
+# BunnyFile behind Tinyauth (forward-auth) + Caddy.
+#
+# Tinyauth handles login; BunnyFile trusts the Remote-User header.
+# NOTE: Native better-auth and forward-auth are mutually exclusive — enable
+# forward-auth mode in BunnyFile when this stack is wired up (see PLAN.md).
+#
+# This compose file documents the intended layout. Adjust image names and
+# Tinyauth config to match your homelab.
+
+services:
+  bunnyfile:
+    image: ghcr.io/OWNER/bunnyfile:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVER_PORT: 3001
+      SERVER_HOST: 0.0.0.0
+      DATA_DIR: /data/files
+      DB_PATH: /data/bunnyfile.sqlite
+      # AUTH_MODE: forward-auth
+      # FORWARD_AUTH_USER_HEADER: Remote-User
+    volumes:
+      - bunnyfile-data:/data
+    networks:
+      - internal
+
+  tinyauth:
+    image: ghcr.io/steveiliop56/tinyauth:latest
+    restart: unless-stopped
+    env_file:
+      - tinyauth.env
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile.tinyauth:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - internal
+    depends_on:
+      - bunnyfile
+      - tinyauth
+
+networks:
+  internal:
+
+volumes:
+  bunnyfile-data:
+  caddy-data:
+  caddy-config:

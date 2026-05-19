@@ -4,7 +4,7 @@
 
 Lightweight self-hosted file hosting and sharing, built on Bun. S3-compatible API, upload progress feedback, and a minimal architecture. Replaces the "files" half of Nextcloud — nothing more.
 
-**Status:** Pre-alpha. See [`PLAN.md`](./PLAN.md).
+**Status:** Phase 5 — launch polish. See [`PLAN.md`](./PLAN.md).
 
 ## Non-goals (what BunnyFile deliberately is NOT)
 
@@ -78,6 +78,55 @@ docker run -p 3901:3901 -v bunnyfile-data:/data bunnyfile
 | `bun run typecheck` | `tsc --noEmit` in every package |
 | `bun run lint` / `lint:fix` | Biome |
 
+## Production deploy
+
+Pre-built images publish to GHCR on GitHub Release (`ghcr.io/<owner>/bunnyfile:latest`).
+
+Example stacks live in [`deploy/compose/`](./deploy/compose/):
+
+| File | Use case |
+|---|---|
+| `standalone.yml` | Single container + volume |
+| `caddy.yml` | HTTPS reverse proxy |
+| `tinyauth.yml` | Forward-auth layout (see PLAN.md) |
+
+Copy `deploy/compose/.env.example` → `.env` and set `BETTER_AUTH_SECRET` before first boot.
+
+## Docs
+
+| Doc | Contents |
+|---|---|
+| [`docs/s3-compatibility.md`](./docs/s3-compatibility.md) | S3 client setup, supported ops, limitations |
+| [`docs/migrating-from-nextcloud.md`](./docs/migrating-from-nextcloud.md) | Files-only migration guide |
+
+## Observability
+
+- **OpenAPI / Swagger UI:** `/api/docs` (REST routes; S3 excluded — use AWS docs)
+- **Prometheus metrics:** `GET /metrics`
+- **Load smoke test:** `bun scripts/load-test.ts http://localhost:3901`
+
 ## Roadmap
 
 See [`PLAN.md`](./PLAN.md) for development phases 0–6.
+
+## S3-compatible API
+
+BunnyFile speaks enough S3 for rclone, aws-cli, restic, and kopia. The API lives at `/api/s3` on the same host as the web app.
+
+**Quick rclone config:**
+
+```ini
+[bunnyfile]
+type = s3
+provider = Other
+env_auth = false
+access_key_id = YOUR_KEY
+secret_access_key = YOUR_SECRET
+endpoint = http://localhost:3901/api/s3
+region = us-east-1
+force_path_style = true
+```
+
+Create per-user keys in the app under **Settings**, or set `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in the environment for a single global key.
+
+Full client setup, supported operations, and known limitations: [`docs/s3-compatibility.md`](./docs/s3-compatibility.md).

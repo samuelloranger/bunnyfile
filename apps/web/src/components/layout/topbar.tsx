@@ -1,5 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Bell, HelpCircle, LogOut, Menu, Monitor, Moon, Search, Sun, User } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
 import {
@@ -17,13 +18,21 @@ import { Input } from '~/components/ui/input';
 import { Kbd } from '~/components/ui/kbd';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
 import { authClient } from '~/lib/auth-client';
+import {
+  clearNotifications,
+  listNotifications,
+  markNotificationsRead,
+  subscribeNotifications,
+} from '~/lib/notifications';
 import { useTheme } from '~/lib/theme';
 
 export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const { theme, setTheme, resolved } = useTheme();
   const session = authClient.useSession();
   const navigate = useNavigate();
+  const [notifications, setNotifications] = useState(() => listNotifications());
   const user = session.data?.user;
+  const unread = notifications.filter((item) => !item.read).length;
   const initials = user?.name
     ? user.name
         .split(' ')
@@ -36,6 +45,8 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     await authClient.signOut();
     navigate({ to: '/login' });
   }
+
+  useEffect(() => subscribeNotifications(() => setNotifications(listNotifications())), []);
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.8)] px-4 backdrop-blur-md sm:px-6">
@@ -68,18 +79,68 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
           <TooltipContent>Help and shortcuts</TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
+        <DropdownMenu
+          onOpenChange={(open) => {
+            if (open) {
+              markNotificationsRead();
+              setNotifications(listNotifications());
+            }
+          }}
+        >
+          <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
               <Bell />
-              <span
-                aria-hidden
-                className="absolute right-2 top-2 size-1.5 rounded-full bg-[hsl(var(--accent))]"
-              />
+              {unread > 0 && (
+                <span
+                  aria-hidden
+                  className="absolute right-2 top-2 size-1.5 rounded-full bg-[hsl(var(--accent))]"
+                />
+              )}
             </Button>
-          </TooltipTrigger>
-          <TooltipContent>Notifications</TooltipContent>
-        </Tooltip>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80">
+            <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+              <DropdownMenuLabel className="p-0">Notifications</DropdownMenuLabel>
+              {notifications.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    clearNotifications();
+                    setNotifications([]);
+                  }}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            <DropdownMenuSeparator />
+            {notifications.length === 0 ? (
+              <div className="px-2 py-6 text-center text-sm text-[hsl(var(--muted-foreground))]">
+                No notifications.
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto">
+                {notifications.slice(0, 10).map((item) => (
+                  <div key={item.id} className="px-2 py-2">
+                    <p className="text-sm font-medium">{item.title}</p>
+                    {item.body && (
+                      <p className="mt-0.5 line-clamp-2 text-xs text-[hsl(var(--muted-foreground))]">
+                        {item.body}
+                      </p>
+                    )}
+                    <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+                      {new Date(item.createdAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

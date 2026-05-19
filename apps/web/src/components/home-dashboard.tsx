@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { ArrowUpRight, CheckCircle2, Clock, HardDrive, Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge } from '~/components/ui/badge';
@@ -8,11 +8,7 @@ import { api } from '~/lib/api';
 import { displayName, entryMeta, recentFilesQuery } from '~/lib/recent';
 import { formatBytes, storageUsageQuery } from '~/lib/storage';
 
-export const Route = createFileRoute('/_app/')({
-  component: HomePage,
-});
-
-function HomePage() {
+export function HomeDashboard() {
   const usage = useQuery(storageUsageQuery());
   const recent = useQuery(recentFilesQuery(8));
   const health = useQuery({
@@ -40,11 +36,15 @@ function HomePage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" asChild>
-            <Link to="/components">
-              <Sparkles /> View components
+            <Link to="/files" search={{ path: '' }}>
+              <Sparkles /> Browse files
             </Link>
           </Button>
-          <Button rightIcon={<ArrowUpRight />}>Get started</Button>
+          <Button rightIcon={<ArrowUpRight />} asChild>
+            <Link to="/files" search={{ path: '' }}>
+              Upload
+            </Link>
+          </Button>
         </div>
       </header>
 

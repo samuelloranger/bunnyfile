@@ -51,7 +51,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
 import { api } from '~/lib/api';
 import { cn } from '~/lib/cn';
-import { type Entry, filesQuery, humanSize, humanTime } from '~/lib/files';
+import { type Entry, filesQuery, filesSearchQuery, humanSize, humanTime } from '~/lib/files';
+import { pushNotification } from '~/lib/notifications';
 import {
   parseUploadErrorMessage,
   toUploadProgress,
@@ -93,6 +94,8 @@ function FilesPage() {
     percent: number;
   } | null>(null);
   const list = useQuery(filesQuery(path, offset, PAGE_SIZE));
+  const globalQuery = filter.trim().length >= 2 ? filter.trim() : '';
+  const globalSearch = useQuery(filesSearchQuery(globalQuery));
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -105,6 +108,19 @@ function FilesPage() {
   }, [path]);
 
   const entries = useMemo(() => {
+    if (globalQuery) {
+      return (globalSearch.data?.entries ?? []).map(
+        (hit): ListedEntry => ({
+          kind: 'file',
+          name: hit.name,
+          path: hit.path,
+          size: hit.size,
+          mime: hit.mime,
+          mtimeMs: hit.mtimeMs,
+          sha256: null,
+        }),
+      );
+    }
     const all = list.data?.entries ?? [];
     const withParent: ListedEntry[] =
       path && !filter.trim()
@@ -125,7 +141,7 @@ function FilesPage() {
       withParent.filter((entry) => entry.name.toLowerCase().includes(q)),
       sortMode,
     );
-  }, [filter, list.data?.entries, path, sortMode]);
+  }, [filter, globalQuery, globalSearch.data?.entries, list.data?.entries, path, sortMode]);
 
   const previewEntry = useMemo(() => {
     if (!previewPath) return null;
@@ -159,10 +175,14 @@ function FilesPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
-      toast.success('Rescan complete');
+      pushNotification({ kind: 'success', title: 'Rescan complete' });
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Rescan failed');
+      pushNotification({
+        kind: 'error',
+        title: 'Rescan failed',
+        body: err instanceof Error ? err.message : undefined,
+      });
     },
   });
 
@@ -196,14 +216,20 @@ function FilesPage() {
     },
     onSuccess: (_data, files) => {
       qc.invalidateQueries({ queryKey: ['files'] });
-      toast.success(
-        files.length === 1
-          ? `Uploaded ${files[0]?.name ?? 'file'}`
-          : `Uploaded ${files.length} files`,
-      );
+      pushNotification({
+        kind: 'success',
+        title:
+          files.length === 1
+            ? `Uploaded ${files[0]?.name ?? 'file'}`
+            : `Uploaded ${files.length} files`,
+      });
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      pushNotification({
+        kind: 'error',
+        title: 'Upload failed',
+        body: err instanceof Error ? err.message : undefined,
+      });
     },
     onSettled: () => setUploadProgress(null),
   });
@@ -216,10 +242,14 @@ function FilesPage() {
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['files'] });
-      toast.success(`Moved to ${vars.newPath}`);
+      pushNotification({ kind: 'success', title: `Moved to ${vars.newPath}` });
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Rename failed');
+      pushNotification({
+        kind: 'error',
+        title: 'Rename failed',
+        body: err instanceof Error ? err.message : undefined,
+      });
     },
   });
 
@@ -231,10 +261,14 @@ function FilesPage() {
     },
     onSuccess: (_data, folderPath) => {
       qc.invalidateQueries({ queryKey: ['files'] });
-      toast.success(`Folder created: ${folderPath}`);
+      pushNotification({ kind: 'success', title: `Folder created: ${folderPath}` });
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Folder creation failed');
+      pushNotification({
+        kind: 'error',
+        title: 'Folder creation failed',
+        body: err instanceof Error ? err.message : undefined,
+      });
     },
   });
 
@@ -252,10 +286,14 @@ function FilesPage() {
     },
     onSuccess: (data) => {
       setShareUrl(`${window.location.origin}/s/${data.token}`);
-      toast.success('Share link created');
+      pushNotification({ kind: 'success', title: 'Share link created' });
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Share creation failed');
+      pushNotification({
+        kind: 'error',
+        title: 'Share creation failed',
+        body: err instanceof Error ? err.message : undefined,
+      });
     },
   });
 
@@ -452,7 +490,7 @@ function FilesPage() {
               ref={searchRef}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter in current folder (/)"
+              placeholder="Search all files (2+ chars) or filter folder"
               leftIcon={<Search />}
               className="max-w-sm"
             />
@@ -470,11 +508,19 @@ function FilesPage() {
               </SelectContent>
             </Select>
           </div>
-          {list.data && (
+          {globalQuery ? (
             <p className="text-xs text-[hsl(var(--muted-foreground))]">
-              {list.data.total} total
-              {filter ? ` · ${entries.length} shown` : ''}
+              {globalSearch.isLoading
+                ? 'Searching…'
+                : `${globalSearch.data?.entries.length ?? 0} matches`}
             </p>
+          ) : (
+            list.data && (
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                {list.data.total} total
+                {filter ? ` · ${entries.length} shown` : ''}
+              </p>
+            )
           )}
         </div>
         {list.isLoading && (
@@ -868,10 +914,16 @@ function DirectoryRow({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
-      toast.success(`Deleted ${entry.name}`);
+      qc.invalidateQueries({ queryKey: ['trash'] });
+      qc.invalidateQueries({ queryKey: ['storage-usage'] });
+      pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Delete failed');
+      pushNotification({
+        kind: 'error',
+        title: `Could not move ${entry.name} to trash`,
+        body: err instanceof Error ? err.message : undefined,
+      });
     },
   });
   const droppableId = dndId('dir', entry.path);
@@ -931,12 +983,12 @@ function DirectoryRow({
                 <ConfirmDialog
                   trigger={
                     <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
-                      <Trash2 /> Delete
+                      <Trash2 /> Move to trash
                     </DropdownMenuItem>
                   }
-                  title={`Delete "${entry.name}"?`}
-                  description="The folder and all its contents will be permanently removed. This cannot be undone."
-                  confirmLabel="Delete"
+                  title={`Move "${entry.name}" to trash?`}
+                  description="The folder and all its contents will leave My files until restored or permanently deleted."
+                  confirmLabel="Move to trash"
                   tone="destructive"
                   onConfirm={() => del.mutateAsync()}
                 />
@@ -970,10 +1022,16 @@ function FileRow({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
-      toast.success(`Deleted ${entry.name}`);
+      qc.invalidateQueries({ queryKey: ['trash'] });
+      qc.invalidateQueries({ queryKey: ['storage-usage'] });
+      pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Delete failed');
+      pushNotification({
+        kind: 'error',
+        title: `Could not move ${entry.name} to trash`,
+        body: err instanceof Error ? err.message : undefined,
+      });
     },
   });
   const draggableId = dndId('file', entry.path);
@@ -988,8 +1046,13 @@ function FileRow({
       });
       if (!res.ok) throw new Error('Failed to regenerate thumbnail');
     },
-    onSuccess: () => toast.success('Thumbnail regenerated'),
-    onError: () => toast.error('Could not regenerate thumbnail'),
+    onSuccess: () =>
+      pushNotification({ kind: 'success', title: `Thumbnail regenerated for ${entry.name}` }),
+    onError: () =>
+      pushNotification({
+        kind: 'error',
+        title: `Could not regenerate thumbnail for ${entry.name}`,
+      }),
   });
   return (
     <tr
@@ -1098,12 +1161,12 @@ function FileRow({
               <ConfirmDialog
                 trigger={
                   <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
-                    <Trash2 /> Delete
+                    <Trash2 /> Move to trash
                   </DropdownMenuItem>
                 }
-                title={`Delete ${entry.name}?`}
-                description="The file is removed from disk. This cannot be undone."
-                confirmLabel="Delete"
+                title={`Move ${entry.name} to trash?`}
+                description="The file will leave My files until restored or permanently deleted."
+                confirmLabel="Move to trash"
                 tone="destructive"
                 onConfirm={() => del.mutateAsync()}
               />

@@ -42,6 +42,7 @@ import {
 } from '~/components/ui/select';
 import { api } from '~/lib/api';
 import { authClient } from '~/lib/auth-client';
+import { pushNotification } from '~/lib/notifications';
 import { type UserRow, usersQuery } from '~/lib/users';
 
 export const Route = createFileRoute('/_app/people')({
@@ -179,15 +180,39 @@ function UserActions({ user }: { user: UserRow }) {
     mutationFn: async (role: 'admin' | 'user') => {
       const { error } = await api.api.users({ id: user.id }).patch({ role });
       if (error) throw error;
+      return role;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: (role) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      pushNotification({
+        kind: 'success',
+        title: role === 'admin' ? `${user.name} is now an admin` : `${user.name} is now a member`,
+      });
+    },
+    onError: (err: unknown) => {
+      pushNotification({
+        kind: 'error',
+        title: `Could not update ${user.name}`,
+        body: err instanceof Error ? err.message : undefined,
+      });
+    },
   });
   const deleteUser = useMutation({
     mutationFn: async () => {
       const { error } = await api.api.users({ id: user.id }).delete();
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      pushNotification({ kind: 'success', title: `${user.name} deleted` });
+    },
+    onError: (err: unknown) => {
+      pushNotification({
+        kind: 'error',
+        title: `Could not delete ${user.name}`,
+        body: err instanceof Error ? err.message : undefined,
+      });
+    },
   });
 
   return (
@@ -256,6 +281,7 @@ function InviteUserDialog() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] });
       setOpen(false);
+      pushNotification({ kind: 'success', title: `${name} created` });
       setName('');
       setEmail('');
       setPassword('');
@@ -263,7 +289,9 @@ function InviteUserDialog() {
       setError(null);
     },
     onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      pushNotification({ kind: 'error', title: 'Could not create user', body: msg });
     },
   });
 

@@ -50,6 +50,20 @@
       "when": 1777090000000,
       "tag": "0006_thumbnails",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1777170000000,
+      "tag": "0007_file_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1779170000000,
+      "tag": "0008_trash_items",
+      "breakpoints": true
     }
   ]
 }

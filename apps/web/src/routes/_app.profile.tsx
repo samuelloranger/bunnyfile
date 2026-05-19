@@ -18,6 +18,7 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Separator } from '~/components/ui/separator';
 import { authClient } from '~/lib/auth-client';
+import { pushNotification } from '~/lib/notifications';
 
 export const Route = createFileRoute('/_app/profile')({
   component: ProfilePage,
@@ -82,10 +83,16 @@ function ProfileCard() {
     const { error } = await authClient.updateUser({ name, image: image || null });
     if (error) {
       setStatus({ kind: 'err', msg: error.message ?? 'Could not update profile' });
+      pushNotification({
+        kind: 'error',
+        title: 'Could not update profile',
+        body: error.message ?? undefined,
+      });
       return;
     }
     await session.refetch();
     setStatus({ kind: 'ok', msg: 'Profile updated' });
+    pushNotification({ kind: 'success', title: 'Profile updated' });
   }
 
   return (
@@ -145,18 +152,19 @@ function EmailCard() {
       });
       const json = await res.json();
       if (!res.ok) {
-        setStatus({
-          kind: 'err',
-          msg: (json as { error: string }).error ?? 'Could not update email',
-        });
+        const msg = (json as { error: string }).error ?? 'Could not update email';
+        setStatus({ kind: 'err', msg });
+        pushNotification({ kind: 'error', title: 'Could not update email', body: msg });
         return;
       }
       await session.refetch();
       setPassword('');
       setNewEmail('');
       setStatus({ kind: 'ok', msg: 'Email updated successfully' });
+      pushNotification({ kind: 'success', title: 'Email updated' });
     } catch {
       setStatus({ kind: 'err', msg: 'Network error' });
+      pushNotification({ kind: 'error', title: 'Could not update email', body: 'Network error' });
     } finally {
       setPending(false);
     }
@@ -226,12 +234,22 @@ function PasswordCard() {
     setPending(false);
     if (error) {
       setStatus({ kind: 'err', msg: error.message ?? 'Could not change password' });
+      pushNotification({
+        kind: 'error',
+        title: 'Could not change password',
+        body: error.message ?? undefined,
+      });
       return;
     }
     setCurrent('');
     setNext('');
     setConfirm('');
     setStatus({ kind: 'ok', msg: 'Password changed. Other sessions were signed out.' });
+    pushNotification({
+      kind: 'success',
+      title: 'Password changed',
+      body: 'Other sessions were signed out.',
+    });
   }
 
   return (
@@ -298,12 +316,38 @@ function SessionsCard({ currentSessionId }: { currentSessionId: string | undefin
   });
 
   const revokeOne = useMutation({
-    mutationFn: async (token: string) => authClient.revokeSession({ token }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions', 'me'] }),
+    mutationFn: async (token: string) => {
+      const { error } = await authClient.revokeSession({ token });
+      if (error) throw new Error(error.message ?? 'Could not revoke session');
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sessions', 'me'] });
+      pushNotification({ kind: 'success', title: 'Session revoked' });
+    },
+    onError: (err: unknown) => {
+      pushNotification({
+        kind: 'error',
+        title: 'Could not revoke session',
+        body: err instanceof Error ? err.message : undefined,
+      });
+    },
   });
   const revokeOthers = useMutation({
-    mutationFn: async () => authClient.revokeOtherSessions(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions', 'me'] }),
+    mutationFn: async () => {
+      const { error } = await authClient.revokeOtherSessions();
+      if (error) throw new Error(error.message ?? 'Could not sign out other sessions');
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sessions', 'me'] });
+      pushNotification({ kind: 'success', title: 'Other sessions signed out' });
+    },
+    onError: (err: unknown) => {
+      pushNotification({
+        kind: 'error',
+        title: 'Could not sign out other sessions',
+        body: err instanceof Error ? err.message : undefined,
+      });
+    },
   });
 
   return (

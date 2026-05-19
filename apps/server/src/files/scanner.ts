@@ -5,6 +5,7 @@ import { db } from '../db';
 import { fileIndex } from '../db/schema';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
+import { deleteFileSearch, upsertFileSearch } from './search';
 import { DATA_ROOT, hashOnDisk } from './store';
 
 /**
@@ -94,6 +95,7 @@ export async function runScan(): Promise<ScanReport> {
         sha256: hash,
         mime: mimeFromName(basenameOf(path)),
       });
+      await upsertFileSearch(path);
       added++;
     } else if (stale(row, disk)) {
       let hash: string | null = null;
@@ -126,6 +128,9 @@ export async function runScan(): Promise<ScanReport> {
     for (let i = 0; i < missing.length; i += CHUNK) {
       const chunk = missing.slice(i, i + CHUNK);
       await db.delete(fileIndex).where(inArray(fileIndex.path, chunk));
+      for (const p of chunk) {
+        await deleteFileSearch(p);
+      }
       removed += chunk.length;
     }
   }
