@@ -811,6 +811,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
       }
       try {
         const existingRow = db.select().from(fileIndex).where(eq(fileIndex.path, path)).get();
+        await openStream(path);
         const id = crypto.randomUUID();
         const moved = await movePathToTrash(path, id);
         await db.insert(trashItem).values({
