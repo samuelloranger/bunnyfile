@@ -1,5 +1,9 @@
 let active = 0;
 
+export function activeUploadCount(): number {
+  return active;
+}
+
 export function trackUpload<T>(p: Promise<T>): Promise<T> {
   active++;
   return p.finally(() => {

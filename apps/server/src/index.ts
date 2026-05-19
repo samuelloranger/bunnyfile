@@ -12,8 +12,10 @@ import { runMigrations } from './db/migrate';
 import { user } from './db/schema';
 import { filesCron } from './files/cron';
 import { filesRoutes } from './files/routes';
+import { rebuildFileSearchIndex } from './files/search';
 import { filesWatcher } from './files/watcher';
 import { drainUploads } from './inflight';
+import { prometheusMetrics, recordHttpRequest } from './metrics';
 import { accessKeyRoutes } from './s3/access-keys';
 import { s3Routes } from './s3/routes';
 import { sharesRoutes } from './shares/routes';
@@ -26,6 +28,9 @@ const WEB_DIST = resolve(import.meta.dir, '../../web/dist');
 const INDEX_HTML = join(WEB_DIST, 'index.html');
 
 export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
+  .onRequest(() => {
+    recordHttpRequest();
+  })
   .use(
     swagger({
       path: '/api/docs',
@@ -60,6 +65,12 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   .use(s3Routes)
   .use(filesCron)
   .use(filesWatcher)
+  .get('/metrics', async () => {
+    const body = await prometheusMetrics();
+    return new Response(body, {
+      headers: { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' },
+    });
+  })
   .group('/api', (api) =>
     api
       .get(
@@ -112,6 +123,11 @@ export type { Auth } from './auth/auth';
 
 if (import.meta.main) {
   runMigrations();
+  rebuildFileSearchIndex()
+    .then((count) => {
+      if (count > 0) console.log(`[search] indexed ${count} files`);
+    })
+    .catch((err) => console.warn('[search] index rebuild failed', err));
 
   const port = Number(Bun.env.SERVER_PORT ?? 3901);
   const host = Bun.env.SERVER_HOST ?? '0.0.0.0';

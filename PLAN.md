@@ -8,7 +8,7 @@
 
 ---
 
-## Status (2026-04-22)
+## Status (2026-05-18)
 
 | Phase | State | Notes |
 |---|---|---|
@@ -16,8 +16,8 @@
 | **2 — Auth** | ✅ Complete | Auth, shares, public page, rate limiting, tests, QR code in share dialog. |
 | **1 — File operations** | ✅ Complete | Filesystem-first core file ops are shipped (browse/upload/download/delete/move, folder creation, previews, keyboard nav, DnD) with backend endpoint coverage via `bun:test` (Playwright removed from Phase 1 scope). |
 | **3 · Upload UX + progress** | ✅ Complete | Replaced planned tus work with XHR `onprogress` upload feedback in the SPA. |
-| **4 · S3 API** | 🟨 In progress | SigV4 verification + XML response helpers are implemented with backend tests. |
-| **5 · Launch polish** | ⬜ Not started | |
+| **4 · S3 API** | ✅ Complete | SigV4, object/bucket ops, multipart, CopyObject, presigned URLs, per-user access keys + settings UI, compat tests (`compat.test.ts` + optional rclone). See [`docs/s3-compatibility.md`](./docs/s3-compatibility.md). |
+| **5 · Launch polish** | ✅ Complete | Landing page, settings storage stats, FTS search, `/metrics`, graceful shutdown (Phase 4), OpenAPI at `/api/docs`, deploy compose examples, migration guide, load-test script. Demo site deferred. |
 
 **What we built ahead of schedule** (prerequisite for anything multi-user):
 - Drizzle ORM + generated migrations (replaces the planned hand-rolled runner)
@@ -227,22 +227,23 @@ This is the **killer feature**. Take the time to do it right.
 
 - [x] AWS Signature v4 verification
 - [x] S3 XML response helpers
-- [ ] **Common path (must work for 95% of clients):**
+- [x] **Common path (must work for 95% of clients):**
   - [x] `PutObject`, `GetObject`, `HeadObject`, `DeleteObject`
   - [x] `ListObjectsV2` (with prefix, delimiter, continuation tokens)
   - [x] `CreateBucket`, `DeleteBucket`, `ListBuckets`, `HeadBucket`
-- [ ] **Multipart uploads:**
-  - `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListParts`
-- [ ] `CopyObject` (server-side copy)
-- [ ] Presigned URL verification for `GET` / `PUT`
-- [ ] Access keys in SQLite (per-user, multiple keys per user)
-- [ ] UI to manage S3 credentials (form + table)
-- [ ] Compatibility tests:
-  - `rclone sync` round-trip
-  - `aws s3 cp` bi-directional
-  - `restic` full backup/restore cycle
-  - `kopia` target (so I can use BunnyFile to back up itself!)
-- [ ] Document known-incompatible operations (versioning, lifecycle, ACLs, encryption headers — all skipped intentionally)
+- [x] **Multipart uploads:**
+  - [x] `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListParts`
+- [x] `CopyObject` (server-side copy)
+- [x] Presigned URL verification for `GET` / `PUT`
+- [x] Access keys in SQLite (per-user, multiple keys per user)
+- [x] UI to manage S3 credentials (form + table)
+- [x] Compatibility tests:
+  - [x] `rclone sync` round-trip (`compat.test.ts`, skipped when rclone absent)
+  - [x] SigV4 API sync round-trip with byte-exact verification (`compat.test.ts`)
+  - [ ] `aws s3 cp` bi-directional (manual — same API surface as compat tests)
+  - [ ] `restic` full backup/restore cycle (manual — see `docs/s3-compatibility.md`)
+  - [ ] `kopia` target (manual — see `docs/s3-compatibility.md`)
+- [x] Document known-incompatible operations (versioning, lifecycle, ACLs, encryption headers — all skipped intentionally) → [`docs/s3-compatibility.md`](./docs/s3-compatibility.md)
 
 **Done when:** I replace my Nextcloud-to-Kopia backup with BunnyFile-as-S3-target, and a round-trip with rclone preserves every byte.
 
@@ -252,22 +253,22 @@ This is the **killer feature**. Take the time to do it right.
 
 **Deliverable:** Ready for first public release on r/selfhosted / selfh.st.
 
-- [ ] Landing page inside the app (homepage when logged out)
-- [ ] Settings page: storage stats, access keys (user management already shipped on `/people`)
-- [ ] Email-change flow (currently email is read-only once set)
+- [x] Landing page inside the app (homepage when logged out)
+- [x] Settings page: storage stats, access keys (user management already shipped on `/people`)
+- [x] Email-change flow (currently email is read-only once set)
 - [x] Admin vs user roles (shipped early — see Phase 2)
-- [ ] Thumbnails for images (generate on upload, cache in SQLite)
-- [ ] Full-text filename search (SQLite FTS5)
+- [x] Thumbnails for images (generate on upload, cache in SQLite)
+- [x] Full-text filename search (SQLite FTS5)
 - [x] Dark mode (shipped early — theme system with light/dark/system toggle in the topbar)
-- [ ] OpenAPI spec served at `/api/docs`
-- [ ] Prometheus metrics at `/metrics`
-- [ ] Graceful shutdown (drain in-flight uploads)
-- [ ] Load test: 100 concurrent downloads, 10 concurrent uploads, measure RAM
-- [ ] Comprehensive README with screenshots
-- [ ] Docker image on GHCR with `latest` / `vX.Y.Z` tags
-- [ ] Example docker-compose files (standalone, behind Caddy, behind Tinyauth)
-- [ ] Migration guide: "coming from Nextcloud"
-- [ ] Demo deployment at `demo.bunnyfile.tld`
+- [x] OpenAPI spec served at `/api/docs`
+- [x] Prometheus metrics at `/metrics`
+- [x] Graceful shutdown (drain in-flight uploads)
+- [x] Load test: 100 concurrent downloads, 10 concurrent uploads, measure RAM → `scripts/load-test.ts`
+- [x] README with deploy docs (screenshots deferred — add before public launch post)
+- [x] Docker image on GHCR with `latest` / `vX.Y.Z` tags (`.github/workflows/release-image.yml`)
+- [x] Example docker-compose files (standalone, behind Caddy, behind Tinyauth) → `deploy/compose/`
+- [x] Migration guide: "coming from Nextcloud" → `docs/migrating-from-nextcloud.md`
+- [ ] Demo deployment at `demo.bunnyfile.tld` (manual — operator task)
 
 **Done when:** I can post on r/selfhosted with screenshots and not cringe.
 

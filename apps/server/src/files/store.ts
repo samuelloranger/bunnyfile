@@ -145,6 +145,72 @@ export async function removeFolder(rel: string): Promise<void> {
   await rm(path, { recursive: true });
 }
 
+export async function movePathToTrash(
+  rel: string,
+  id: string,
+): Promise<{
+  trashPath: string;
+  kind: 'file' | 'dir';
+  size: number | null;
+  mtimeMs: number;
+  inode: number;
+}> {
+  if (rel === '.trash' || rel.startsWith('.trash/')) {
+    throw new PathError('traversal', 'trash paths cannot be trashed');
+  }
+
+  const from = absFromRelOrThrow(rel);
+  let st: Awaited<ReturnType<typeof stat>>;
+  try {
+    st = await stat(from);
+  } catch {
+    throw new PathError('not_found', `not found: ${rel}`);
+  }
+
+  const name = rel.split('/').at(-1) ?? id;
+  const trashPath = `.trash/${id}/${name}`;
+  const to = absFromRelOrThrow(trashPath);
+  await mkdir(dirname(to), { recursive: true });
+  await rename(from, to);
+
+  return {
+    trashPath,
+    kind: st.isDirectory() ? 'dir' : 'file',
+    size: st.isFile() ? st.size : null,
+    mtimeMs: Math.round(st.mtimeMs),
+    inode: Number(st.ino),
+  };
+}
+
+export async function restorePathFromTrash(trashRel: string, originalRel: string): Promise<void> {
+  const from = absFromRelOrThrow(trashRel);
+  const to = absFromRelOrThrow(originalRel);
+
+  try {
+    await stat(from);
+  } catch {
+    throw new PathError('not_found', `not found: ${trashRel}`);
+  }
+
+  try {
+    await stat(to);
+    throw new PathError('exists', `already exists: ${originalRel}`);
+  } catch (err) {
+    if (err instanceof PathError) throw err;
+    if (!(err instanceof Error) || !('code' in err) || err.code !== 'ENOENT') {
+      throw err;
+    }
+  }
+
+  await mkdir(dirname(to), { recursive: true });
+  await rename(from, to);
+}
+
+export async function removeTrashPath(trashRel: string): Promise<void> {
+  const path = absFromRelOrThrow(trashRel);
+  await rm(path, { recursive: true, force: true });
+}
+
 export async function moveFile(fromRel: string, toRel: string): Promise<void> {
   const from = absFromRelOrThrow(fromRel);
   const to = absFromRelOrThrow(toRel);

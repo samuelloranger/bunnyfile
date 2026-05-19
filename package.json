@@ -17,6 +17,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
+    "load-test": "bun scripts/load-test.ts",
     "docker:up": "docker compose up -d && echo '\nWeb:    http://localhost:3900\nServer: http://localhost:3901\n'",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f"

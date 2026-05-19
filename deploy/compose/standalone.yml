@@ -1,0 +1,32 @@
+# Standalone BunnyFile — single container with a named volume.
+#
+# Usage:
+#   cp deploy/compose/.env.example deploy/compose/.env
+#   # Edit BETTER_AUTH_SECRET and S3 keys in .env
+#   docker compose -f deploy/compose/standalone.yml up -d
+#
+# Open http://localhost:3001 — first visitor creates the admin account.
+
+services:
+  bunnyfile:
+    image: ghcr.io/OWNER/bunnyfile:latest
+    restart: unless-stopped
+    ports:
+      - '3001:3001'
+    env_file:
+      - .env
+    environment:
+      SERVER_PORT: 3001
+      SERVER_HOST: 0.0.0.0
+      DATA_DIR: /data/files
+      DB_PATH: /data/bunnyfile.sqlite
+    volumes:
+      - bunnyfile-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'bun -e "await fetch(\"http://localhost:3001/api/health\")"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  bunnyfile-data:

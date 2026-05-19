@@ -219,4 +219,28 @@ export const thumbnail = sqliteTable('thumbnail', {
   height: integer('height').notNull(),
 });
 
+export const trashItem = sqliteTable(
+  'trash_item',
+  {
+    id: text('id').primaryKey(),
+    originalPath: text('original_path').notNull(),
+    trashPath: text('trash_path').notNull().unique(),
+    kind: text('kind', { enum: ['file', 'dir'] }).notNull(),
+    size: integer('size'),
+    mime: text('mime'),
+    deletedByUserId: text('deleted_by_user_id').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    deletedAt: integer('deleted_at', { mode: 'timestamp_ms' })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (t) => [
+    index('trash_item_deleted_by_user_id_idx').on(t.deletedByUserId),
+    index('trash_item_deleted_at_idx').on(t.deletedAt),
+  ],
+);
+
+export type TrashItemRow = typeof trashItem.$inferSelect;
+
 export type ThumbnailRow = typeof thumbnail.$inferSelect;
