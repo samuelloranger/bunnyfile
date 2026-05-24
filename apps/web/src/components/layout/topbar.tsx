@@ -53,6 +53,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     const q = searchQuery.trim();
     if (!q) return;
     navigate({ to: '/files', search: buildFilesSearch({ q, mode: 'all' }) });
+    setSearchQuery('');
   }
 
   return (

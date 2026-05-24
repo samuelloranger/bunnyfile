@@ -56,6 +56,7 @@ import {
   buildFilesSearch,
   type FilesSearchMode,
   parseFilesSearch,
+  resolveFilesSearch,
   shouldUseGlobalSearch,
 } from '~/lib/files-search';
 import { pushNotification } from '~/lib/notifications';
@@ -75,7 +76,7 @@ export const Route = createFileRoute('/_app/files')({
 
 function FilesPage() {
   const PAGE_SIZE = 200;
-  const { path, q, mode, upload: uploadTrigger } = Route.useSearch();
+  const { path, q, mode, upload: uploadTrigger } = resolveFilesSearch(Route.useSearch());
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [offset, setOffset] = useState(0);
@@ -101,6 +102,7 @@ function FilesPage() {
   const globalSearch = useQuery(filesSearchQuery(globalQuery));
   const folderFilter = mode === 'folder' ? q.trim().toLowerCase() : '';
   const isGlobalSearch = Boolean(globalQuery);
+  const allModePrompt = mode === 'all' && !globalQuery;
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -132,6 +134,7 @@ function FilesPage() {
         }),
       );
     }
+    if (mode === 'all') return [];
     const all = list.data?.entries ?? [];
     const withParent: ListedEntry[] =
       path && !folderFilter
@@ -151,7 +154,15 @@ function FilesPage() {
       withParent.filter((entry) => entry.name.toLowerCase().includes(folderFilter)),
       sortMode,
     );
-  }, [folderFilter, globalQuery, globalSearch.data?.entries, list.data?.entries, path, sortMode]);
+  }, [
+    folderFilter,
+    globalQuery,
+    globalSearch.data?.entries,
+    list.data?.entries,
+    mode,
+    path,
+    sortMode,
+  ]);
 
   const previewEntry = useMemo(() => {
     if (!previewPath) return null;
@@ -446,7 +457,11 @@ function FilesPage() {
   }
 
   const isEmpty =
-    !isGlobalSearch && !folderFilter && !list.isLoading && list.data?.entries.length === 0;
+    !isGlobalSearch &&
+    !allModePrompt &&
+    !folderFilter &&
+    !list.isLoading &&
+    list.data?.entries.length === 0;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: page-wide drop zone; overlay is announced separately
@@ -562,6 +577,7 @@ function FilesPage() {
                 : `${globalSearch.data?.entries.length ?? 0} matches`}
             </p>
           ) : (
+            !allModePrompt &&
             list.data && (
               <p className="text-xs text-[hsl(var(--muted-foreground))]">
                 {list.data.total} total
@@ -570,13 +586,13 @@ function FilesPage() {
             )
           )}
         </div>
-        {!isGlobalSearch && list.isLoading && (
+        {!isGlobalSearch && !allModePrompt && list.isLoading && (
           <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
         )}
         {isGlobalSearch && globalSearch.isLoading && (
           <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Searching…</p>
         )}
-        {!isGlobalSearch && list.isError && (
+        {!isGlobalSearch && !allModePrompt && list.isError && (
           <p className="p-6 text-sm text-[hsl(var(--destructive))]">
             {String((list.error as Error)?.message ?? list.error)}
           </p>
@@ -584,6 +600,13 @@ function FilesPage() {
         {isGlobalSearch && globalSearch.isError && (
           <p className="p-6 text-sm text-[hsl(var(--destructive))]">
             {String((globalSearch.error as Error)?.message ?? globalSearch.error)}
+          </p>
+        )}
+        {allModePrompt && (
+          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
+            {q.trim().length === 0
+              ? 'Type at least 2 characters to search all files.'
+              : 'Keep typing — searches require at least 2 characters.'}
           </p>
         )}
         {isEmpty && (
@@ -643,16 +666,18 @@ function FilesPage() {
             </div>
           </DragDropProvider>
         )}
-        {!list.isLoading && !globalSearch.isLoading && !isEmpty && entries.length === 0 && (
-          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
-            {isGlobalSearch && q.trim().length < 2
-              ? 'Type at least 2 characters to search all files.'
-              : 'No files match your search.'}
-          </p>
-        )}
+        {!list.isLoading &&
+          !globalSearch.isLoading &&
+          !isEmpty &&
+          !allModePrompt &&
+          entries.length === 0 && (
+            <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
+              No files match your search.
+            </p>
+          )}
       </section>
 
-      {list.data && !isGlobalSearch && !folderFilter && (
+      {list.data && !isGlobalSearch && !allModePrompt && !folderFilter && (
         <div className="flex items-center justify-end gap-2">
           <Button
             variant="outline"

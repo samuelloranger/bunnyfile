@@ -60,11 +60,6 @@ function LandingPage({ needsSetup }: { needsSetup: boolean }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!needsSetup && (
-            <Button variant="ghost" asChild>
-              <Link to="/login">Sign in</Link>
-            </Button>
-          )}
           <Button asChild>
             <Link to={needsSetup ? '/setup' : '/login'}>
               {needsSetup ? 'Create admin account' : 'Sign in'}
