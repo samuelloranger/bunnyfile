@@ -1,12 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   FolderOpen,
-  Home,
   type LucideIcon,
   Settings,
   Share2,
-  Sparkles,
   Trash2,
   UploadCloud,
   Users,
@@ -17,7 +15,9 @@ import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Separator } from '~/components/ui/separator';
 import { cn } from '~/lib/cn';
+import { buildFilesSearch } from '~/lib/files-search';
 import { formatBytes, storageUsageQuery } from '~/lib/storage';
+import { useUploadTrigger } from '~/lib/upload-trigger';
 
 type NavItem = {
   label: string;
@@ -27,14 +27,12 @@ type NavItem = {
 };
 
 const PRIMARY: NavItem[] = [
-  { label: 'Home', to: '/', icon: Home },
   { label: 'My files', to: '/files', icon: FolderOpen },
   { label: 'Shared', to: '/shared', icon: Share2 },
   { label: 'People', to: '/people', icon: Users },
 ];
 
 const SECONDARY: NavItem[] = [
-  { label: 'Components', to: '/components', icon: Sparkles },
   { label: 'Trash', to: '/trash', icon: Trash2 },
   { label: 'Settings', to: '/settings', icon: Settings },
 ];
@@ -76,6 +74,8 @@ function NavLink({ item }: { item: NavItem }) {
 }
 
 export function Sidebar({ className }: { className?: string }) {
+  const navigate = useNavigate();
+  const { trigger: triggerUpload } = useUploadTrigger();
   const usage = useQuery(storageUsageQuery());
   const usedBytes = usage.data?.usedBytes ?? 0;
   const totalBytes = usage.data?.totalBytes ?? null;
@@ -104,7 +104,18 @@ export function Sidebar({ className }: { className?: string }) {
       <Separator />
 
       <div className="px-3 py-3">
-        <Button className="w-full justify-start" size="md" leftIcon={<UploadCloud />}>
+        <Button
+          className="w-full justify-start"
+          size="md"
+          leftIcon={<UploadCloud />}
+          onClick={() => {
+            // Try opening the picker synchronously from this click (preserves
+            // the user-activation gesture that Safari/Firefox require). Fall
+            // back to navigating with ?upload=1 when FilesPage isn't mounted.
+            if (triggerUpload()) return;
+            navigate({ to: '/files', search: buildFilesSearch({ upload: true }) });
+          }}
+        >
           Upload files
         </Button>
       </div>

@@ -1,11 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, Navigate } from '@tanstack/react-router';
-import { Cloud, HardDrive, Share2, Shield, Zap } from 'lucide-react';
+import {
+  ChevronRight,
+  FileText,
+  Folder,
+  HardDrive,
+  Home,
+  Image as ImageIcon,
+  Share2,
+} from 'lucide-react';
 import logo from '~/assets/logo-platform-dark.svg';
-import { HomeDashboard } from '~/components/home-dashboard';
-import { AppShell } from '~/components/layout/app-shell';
 import { Button } from '~/components/ui/button';
 import { authClient } from '~/lib/auth-client';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { setupStatusQuery } from '~/lib/setup';
 
 export const Route = createFileRoute('/')({
@@ -19,11 +26,7 @@ function IndexPage() {
   if (setup.isLoading || session.isPending) return <SplashScreen />;
   if (setup.data?.needsSetup) return <Navigate to="/setup" />;
   if (session.data?.user) {
-    return (
-      <AppShell>
-        <HomeDashboard />
-      </AppShell>
-    );
+    return <Navigate to="/files" search={FILES_HOME_SEARCH} />;
   }
 
   return <LandingPage needsSetup={false} />;
@@ -57,80 +60,66 @@ function LandingPage({ needsSetup }: { needsSetup: boolean }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" asChild>
-            <Link to="/login">Sign in</Link>
-          </Button>
           <Button asChild>
             <Link to={needsSetup ? '/setup' : '/login'}>
-              {needsSetup ? 'Set up' : 'Get started'}
+              {needsSetup ? 'Create admin account' : 'Sign in'}
             </Link>
           </Button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-20 pt-10 sm:px-6 sm:pt-16">
-        <section className="mx-auto max-w-3xl text-center">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--primary))]">
-            Self-hosted file hosting
-          </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
-            Your files. Your server. Zero bloat.
-          </h1>
-          <p className="mt-4 text-base text-[hsl(var(--muted-foreground))] sm:text-lg">
-            BunnyFile replaces the files half of Nextcloud — browse, upload, share, and back up with
-            an S3-compatible API. Built on Bun, SQLite, and a filesystem you can actually trust.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Button size="lg" asChild>
-              <Link to={needsSetup ? '/setup' : '/login'}>
-                {needsSetup ? 'Create admin account' : 'Sign in to your instance'}
-              </Link>
-            </Button>
-            <Button size="lg" variant="outline" asChild>
-              <Link to="/login">Learn more in the app</Link>
-            </Button>
-          </div>
-        </section>
-
-        <section className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <FeatureCard
-            icon={<Zap />}
-            title="Fast & lean"
-            body="Cold start under half a second. Idle RAM measured in megabytes, not gigabytes."
-          />
-          <FeatureCard
-            icon={<Cloud />}
-            title="S3-compatible"
-            body="Point rclone, restic, or kopia at BunnyFile. Multipart uploads, presigned URLs, access keys."
-          />
-          <FeatureCard
-            icon={<Share2 />}
-            title="Share links"
-            body="Password-protected, expiring links with QR codes — no WeTransfer required."
-          />
-          <FeatureCard
-            icon={<Shield />}
-            title="You own the data"
-            body="Files stay on disk. Metadata in SQLite. Write-then-rename for every upload."
-          />
-        </section>
-
-        <section className="mt-16 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-8 sm:p-10">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 text-[hsl(var(--primary))]">
-                <HardDrive className="size-5" />
-                <span className="text-sm font-medium">Homelab ready</span>
-              </div>
-              <h2 className="text-2xl font-semibold tracking-tight">One container. One process.</h2>
-              <p className="max-w-xl text-sm text-[hsl(var(--muted-foreground))]">
-                Elysia serves the React SPA and REST API together. Docker image on GHCR. Example
-                Compose stacks for standalone, Caddy, and Tinyauth.
+      <main className="mx-auto max-w-6xl px-4 pb-20 pt-6 sm:px-6 sm:pt-10">
+        <section className="grid items-center gap-10 lg:grid-cols-2 lg:gap-12">
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--primary))]">
+                Self-hosted file hosting
+              </p>
+              <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+                Your files. Your server. Zero bloat.
+              </h1>
+              <p className="max-w-lg text-base text-[hsl(var(--muted-foreground))] sm:text-lg">
+                Browse and upload files, share password-protected links, and back up with
+                S3-compatible clients — without the weight of a full collaboration suite.
               </p>
             </div>
-            <Button size="lg" variant="outline" asChild>
-              <Link to="/login">Open your instance</Link>
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button size="lg" asChild>
+                <Link to={needsSetup ? '/setup' : '/login'}>
+                  {needsSetup ? 'Create admin account' : 'Sign in'}
+                </Link>
+              </Button>
+            </div>
+            <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-[hsl(var(--muted-foreground))]">
+              <li className="inline-flex items-center gap-1.5">
+                <Folder className="size-4 text-[hsl(var(--primary))]" />
+                File browser
+              </li>
+              <li className="inline-flex items-center gap-1.5">
+                <Share2 className="size-4 text-[hsl(var(--primary))]" />
+                Share links
+              </li>
+              <li className="inline-flex items-center gap-1.5">
+                <HardDrive className="size-4 text-[hsl(var(--primary))]" />
+                S3-compatible backup
+              </li>
+            </ul>
+          </div>
+
+          <FileManagerPreview />
+        </section>
+
+        <section className="mt-20 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-8 sm:p-10">
+          <div className="max-w-2xl space-y-2">
+            <div className="inline-flex items-center gap-2 text-[hsl(var(--primary))]">
+              <HardDrive className="size-5" />
+              <span className="text-sm font-medium">Homelab ready</span>
+            </div>
+            <h2 className="text-2xl font-semibold tracking-tight">One container. One process.</h2>
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+              A single Bun process serves the web app and API. Files stay on disk, metadata in
+              SQLite, and every upload uses write-then-rename for safety.
+            </p>
           </div>
         </section>
       </main>
@@ -142,22 +131,54 @@ function LandingPage({ needsSetup }: { needsSetup: boolean }) {
   );
 }
 
-function FeatureCard({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
+function FileManagerPreview() {
+  const rows = [
+    { name: 'Documents', kind: 'dir' as const, meta: '12 items' },
+    { name: 'quarterly-report.pdf', kind: 'file' as const, meta: '2.4 MB' },
+    { name: 'team-photo.jpg', kind: 'image' as const, meta: '840 KB' },
+    { name: 'backup-notes.md', kind: 'doc' as const, meta: '4 KB' },
+  ];
+
   return (
-    <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-5">
-      <div className="inline-flex size-10 items-center justify-center rounded-lg bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))] [&_svg]:size-5">
-        {icon}
+    <div
+      aria-hidden
+      className="overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--surface))] shadow-lg"
+    >
+      <div className="flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] px-4 py-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+            Files
+          </p>
+          <nav className="mt-1 flex items-center gap-1 text-xs text-[hsl(var(--muted-foreground))]">
+            <Home className="size-3" />
+            <span>Root</span>
+            <ChevronRight className="size-3" />
+            <span className="text-[hsl(var(--foreground))]">Documents</span>
+          </nav>
+        </div>
+        <span className="rounded-md bg-[hsl(var(--primary)/0.12)] px-2 py-1 text-[10px] font-medium text-[hsl(var(--primary))]">
+          Preview
+        </span>
       </div>
-      <h3 className="mt-4 text-sm font-semibold">{title}</h3>
-      <p className="mt-1.5 text-sm text-[hsl(var(--muted-foreground))]">{body}</p>
+      <div className="divide-y divide-[hsl(var(--border))]">
+        {rows.map((row) => (
+          <div key={row.name} className="flex items-center gap-3 px-4 py-3">
+            <PreviewIcon kind={row.kind} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{row.name}</p>
+            </div>
+            <p className="shrink-0 text-xs text-[hsl(var(--muted-foreground))]">{row.meta}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
+}
+
+function PreviewIcon({ kind }: { kind: 'dir' | 'file' | 'image' | 'doc' }) {
+  const className = 'size-4 shrink-0 text-[hsl(var(--muted-foreground))]';
+  if (kind === 'dir') return <Folder className={className} />;
+  if (kind === 'image') return <ImageIcon className={className} />;
+  if (kind === 'doc') return <FileText className={className} />;
+  return <FileText className={className} />;
 }

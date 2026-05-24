@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Download, LockKeyhole } from 'lucide-react';
-import { useState } from 'react';
-import { toast } from 'sonner';
+import { Clock, Download, LockKeyhole, ShieldAlert } from 'lucide-react';
+import { type FormEvent, useState } from 'react';
+import logo from '~/assets/logo-platform-dark.svg';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { api } from '~/lib/api';
@@ -15,7 +16,7 @@ export const Route = createFileRoute('/s/$token')({
 function PublicSharePage() {
   const { token } = Route.useParams();
   const [password, setPassword] = useState('');
-  const [downloading, setDownloading] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const share = useQuery({
     queryKey: ['public-share', token],
@@ -27,113 +28,139 @@ function PublicSharePage() {
     retry: false,
   });
 
-  async function download() {
-    if (!share.data || !('status' in share.data) || share.data.status !== 'ok') return;
-    setDownloading(true);
-    try {
-      const url = new URL(
-        `/api/shares/public/${encodeURIComponent(token)}/file`,
-        window.location.origin,
-      );
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: password.trim() || undefined }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? 'Download failed');
-      }
-      const blob = await res.blob();
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = href;
-      a.download = share.data.name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(href);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Download failed');
-    } finally {
-      setDownloading(false);
-    }
-  }
-
   const status =
     share.data && 'status' in share.data && share.data.status !== 'ok' ? share.data.status : null;
 
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    if (
+      share.data &&
+      'status' in share.data &&
+      share.data.status === 'ok' &&
+      share.data.requiresPassword &&
+      !password.trim()
+    ) {
+      e.preventDefault();
+      setPasswordError('Enter the password before downloading.');
+    }
+  }
+
+  const okShare =
+    share.data && 'status' in share.data && share.data.status === 'ok' ? share.data : null;
+
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-[hsl(var(--background))] px-4 py-8">
-      <main className="w-full max-w-xl rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-6">
-        <p className="text-xs font-medium uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-          BunnyFile Share
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Shared file</h1>
-        <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
-          {status
-            ? "This share isn't available."
-            : 'A file has been shared with you. You can download it below.'}
-        </p>
+    <div className="flex min-h-dvh flex-col bg-[hsl(var(--background))]">
+      <header className="border-b border-[hsl(var(--border))] bg-[hsl(var(--surface))] px-4 py-4 sm:px-6">
+        <div className="mx-auto flex max-w-xl items-center gap-3">
+          <img src={logo} alt="BunnyFile" className="size-9 rounded-lg shadow-sm" />
+          <div>
+            <p className="text-sm font-semibold leading-tight">BunnyFile</p>
+            <p className="text-xs text-[hsl(var(--muted-foreground))]">Shared file</p>
+          </div>
+        </div>
+      </header>
 
-        {share.isLoading && (
-          <p className="mt-6 text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
-        )}
+      <main className="flex flex-1 items-center justify-center px-4 py-8">
+        <div className="w-full max-w-xl rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--surface))] p-6 shadow-sm">
+          {share.isLoading && (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading share…</p>
+          )}
 
-        {share.isError && (
-          <p className="mt-6 rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] p-3 text-sm text-[hsl(var(--destructive))]">
-            Failed to load share.
-          </p>
-        )}
+          {share.isError && (
+            <p className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] p-3 text-sm text-[hsl(var(--destructive))]">
+              Failed to load this share. The link may be invalid.
+            </p>
+          )}
 
-        {share.data && 'status' in share.data && share.data.status !== 'ok' && (
-          <p className="mt-6 rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] p-3 text-sm text-[hsl(var(--destructive))]">
-            {share.data.message}
-          </p>
-        )}
-
-        {share.data && 'status' in share.data && share.data.status === 'ok' && (
-          <div className="mt-6 space-y-4">
-            <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-3">
-              <p className="truncate text-sm font-medium">{share.data.name}</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                {share.data.size != null ? humanSize(share.data.size) : 'Size unknown'} ·{' '}
-                {displayMimeLabel(share.data.mime, share.data.name)}
+          {status && share.data && 'message' in share.data && (
+            <div className="space-y-3">
+              <h1 className="text-xl font-semibold tracking-tight">Share unavailable</h1>
+              <p className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] p-3 text-sm text-[hsl(var(--destructive))]">
+                {share.data.message}
               </p>
             </div>
+          )}
 
-            {share.data.requiresPassword && (
-              <div className="space-y-1">
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">Password required</p>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter password"
-                  leftIcon={<LockKeyhole />}
-                />
+          {okShare && (
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <h1 className="truncate text-2xl font-semibold tracking-tight">{okShare.name}</h1>
+                <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                  {okShare.size != null ? humanSize(okShare.size) : 'Size unknown'} ·{' '}
+                  {displayMimeLabel(okShare.mime, okShare.name)}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {okShare.requiresPassword && (
+                    <Badge variant="outline">
+                      <LockKeyhole className="size-3" /> Password protected
+                    </Badge>
+                  )}
+                  {okShare.expiresAt && (
+                    <Badge variant="outline">
+                      <Clock className="size-3" />
+                      Expires {formatExpiry(okShare.expiresAt)}
+                    </Badge>
+                  )}
+                  {okShare.maxDownloads != null && (
+                    <Badge variant="outline">
+                      <ShieldAlert className="size-3" />
+                      {okShare.downloadCount} / {okShare.maxDownloads} downloads used
+                    </Badge>
+                  )}
+                </div>
               </div>
-            )}
 
-            <Button
-              className="w-full"
-              leftIcon={<Download />}
-              loading={downloading}
-              onClick={download}
-            >
-              Download
-            </Button>
-          </div>
-        )}
+              <form
+                method="POST"
+                action={`/api/shares/public/${encodeURIComponent(token)}/file`}
+                onSubmit={handleSubmit}
+                className="space-y-4"
+              >
+                {okShare.requiresPassword && (
+                  <div className="space-y-1">
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      Password required to download
+                    </p>
+                    <Input
+                      type="password"
+                      name="password"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        setPasswordError(null);
+                      }}
+                      placeholder="Enter password"
+                      leftIcon={<LockKeyhole />}
+                      invalid={Boolean(passwordError)}
+                    />
+                    {passwordError && (
+                      <p className="text-xs text-[hsl(var(--destructive))]">{passwordError}</p>
+                    )}
+                  </div>
+                )}
 
-        <div className="mt-6 border-t border-[hsl(var(--border))] pt-4">
-          <Link to="/login" className="text-sm text-[hsl(var(--primary))] hover:underline">
-            Open BunnyFile
-          </Link>
+                <Button type="submit" className="w-full" leftIcon={<Download />}>
+                  Download file
+                </Button>
+              </form>
+            </div>
+          )}
         </div>
       </main>
+
+      <footer className="border-t border-[hsl(var(--border))] px-4 py-4 text-center sm:px-6">
+        <Link to="/login" className="text-sm text-[hsl(var(--primary))] hover:underline">
+          Open BunnyFile
+        </Link>
+      </footer>
     </div>
   );
+}
+
+function formatExpiry(expiresAt: string | number | Date) {
+  return new Date(expiresAt).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
 }
 
 const KNOWN_MIME_TYPES = new Set([

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { api } from '~/lib/api';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { displayName, entryMeta, recentFilesQuery } from '~/lib/recent';
 import { formatBytes, storageUsageQuery } from '~/lib/storage';
 
@@ -36,12 +37,12 @@ export function HomeDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" asChild>
-            <Link to="/files" search={{ path: '' }}>
+            <Link to="/files" search={FILES_HOME_SEARCH}>
               <Sparkles /> Browse files
             </Link>
           </Button>
           <Button rightIcon={<ArrowUpRight />} asChild>
-            <Link to="/files" search={{ path: '' }}>
+            <Link to="/files" search={FILES_HOME_SEARCH}>
               Upload
             </Link>
           </Button>
@@ -87,7 +88,7 @@ export function HomeDashboard() {
             </p>
           </div>
           <Button variant="ghost" size="sm" rightIcon={<ArrowUpRight />} asChild>
-            <Link to="/files" search={{ path: '' }}>
+            <Link to="/files" search={FILES_HOME_SEARCH}>
               View all
             </Link>
           </Button>

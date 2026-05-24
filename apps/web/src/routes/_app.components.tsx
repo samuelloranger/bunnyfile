@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import {
   Copy,
   Download,
@@ -57,8 +57,14 @@ import {
 } from '~/components/ui/select';
 import { Separator } from '~/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 
 export const Route = createFileRoute('/_app/components')({
+  beforeLoad: () => {
+    if (!import.meta.env.DEV) {
+      throw redirect({ to: '/files', search: FILES_HOME_SEARCH });
+    }
+  },
   component: ComponentsPage,
 });
 

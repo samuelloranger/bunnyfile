@@ -22,7 +22,15 @@ import {
   Video,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ChangeEvent,
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { toast } from 'sonner';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -52,30 +60,35 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip
 import { api } from '~/lib/api';
 import { cn } from '~/lib/cn';
 import { type Entry, filesQuery, filesSearchQuery, humanSize, humanTime } from '~/lib/files';
+import {
+  buildFilesSearch,
+  type FilesSearchMode,
+  parseFilesSearch,
+  resolveFilesSearch,
+  shouldUseGlobalSearch,
+} from '~/lib/files-search';
 import { pushNotification } from '~/lib/notifications';
 import {
   parseUploadErrorMessage,
   toUploadProgress,
   uploadButtonLabel,
 } from '~/lib/upload-progress';
+import { useUploadTrigger } from '~/lib/upload-trigger';
 
 type ListedEntry = Entry & { isParentLink?: boolean };
 type SortMode = 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc' | 'date-desc' | 'date-asc';
 
 export const Route = createFileRoute('/_app/files')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    path: typeof search.path === 'string' ? search.path : '',
-  }),
+  validateSearch: parseFilesSearch,
   component: FilesPage,
 });
 
 function FilesPage() {
   const PAGE_SIZE = 200;
-  const { path } = Route.useSearch();
+  const { path, q, mode, upload: uploadTrigger } = resolveFilesSearch(Route.useSearch());
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [offset, setOffset] = useState(0);
-  const [filter, setFilter] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('name-asc');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -94,18 +107,27 @@ function FilesPage() {
     percent: number;
   } | null>(null);
   const list = useQuery(filesQuery(path, offset, PAGE_SIZE));
-  const globalQuery = filter.trim().length >= 2 ? filter.trim() : '';
+  const globalQuery = shouldUseGlobalSearch(mode, q) ? q.trim() : '';
   const globalSearch = useQuery(filesSearchQuery(globalQuery));
+  const folderFilter = mode === 'folder' ? q.trim().toLowerCase() : '';
+  const isGlobalSearch = Boolean(globalQuery);
+  const allModePrompt = mode === 'all' && !globalQuery;
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    // Reset paging/selection when folder changes.
+    // Reset paging/selection when folder or search mode changes.
     void path;
+    void mode;
+    void q;
     setOffset(0);
     setSelectedIndex(0);
-  }, [path]);
+  }, [path, mode, q]);
+
+  useEffect(() => {
+    if (q) searchRef.current?.focus();
+  }, [q]);
 
   const entries = useMemo(() => {
     if (globalQuery) {
@@ -121,9 +143,10 @@ function FilesPage() {
         }),
       );
     }
+    if (mode === 'all') return [];
     const all = list.data?.entries ?? [];
     const withParent: ListedEntry[] =
-      path && !filter.trim()
+      path && !folderFilter
         ? [
             {
               kind: 'dir',
@@ -135,19 +158,26 @@ function FilesPage() {
             ...all,
           ]
         : all;
-    if (!filter.trim()) return sortEntries(withParent, sortMode);
-    const q = filter.toLowerCase();
+    if (!folderFilter) return sortEntries(withParent, sortMode);
     return sortEntries(
-      withParent.filter((entry) => entry.name.toLowerCase().includes(q)),
+      withParent.filter((entry) => entry.name.toLowerCase().includes(folderFilter)),
       sortMode,
     );
-  }, [filter, globalQuery, globalSearch.data?.entries, list.data?.entries, path, sortMode]);
+  }, [
+    folderFilter,
+    globalQuery,
+    globalSearch.data?.entries,
+    list.data?.entries,
+    mode,
+    path,
+    sortMode,
+  ]);
 
   const previewEntry = useMemo(() => {
     if (!previewPath) return null;
-    const found = list.data?.entries.find((item) => item.path === previewPath);
+    const found = entries.find((item) => item.path === previewPath);
     return found && found.kind === 'file' ? found : null;
-  }, [list.data?.entries, previewPath]);
+  }, [entries, previewPath]);
 
   useEffect(() => {
     if (entries.length === 0) {
@@ -297,9 +327,22 @@ function FilesPage() {
     },
   });
 
-  function openPicker() {
+  const openPicker = useCallback(() => {
     inputRef.current?.click();
-  }
+  }, []);
+
+  const { registerOpener } = useUploadTrigger();
+  useEffect(() => registerOpener(openPicker), [registerOpener, openPicker]);
+
+  useEffect(() => {
+    if (!uploadTrigger) return;
+    inputRef.current?.click();
+    navigate({
+      to: '/files',
+      search: buildFilesSearch({ path, q, mode, upload: false }),
+      replace: true,
+    });
+  }, [uploadTrigger, path, q, mode, navigate]);
 
   function onPicked(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.currentTarget.files ?? []);
@@ -353,7 +396,7 @@ function FilesPage() {
         const selected = entries[selectedIndex];
         if (!selected) return;
         if (selected.kind === 'dir') {
-          navigate({ to: '/files', search: { path: selected.path } });
+          navigate({ to: '/files', search: buildFilesSearch({ path: selected.path, q, mode }) });
         } else {
           setPreviewPath(selected.path);
         }
@@ -364,7 +407,7 @@ function FilesPage() {
     return () => {
       window.removeEventListener('keydown', onGridKeyDown);
     };
-  }, [entries, navigate, selectedIndex]);
+  }, [entries, navigate, selectedIndex, q, mode]);
 
   function toTargetPath(currentPath: string, rawInput: string): string {
     const trimmed = rawInput.trim().replace(/^\/+/, '');
@@ -425,7 +468,12 @@ function FilesPage() {
     await createShareMutation.mutateAsync(payload);
   }
 
-  const isEmpty = !list.isLoading && list.data?.entries.length === 0;
+  const isEmpty =
+    !isGlobalSearch &&
+    !allModePrompt &&
+    !folderFilter &&
+    !list.isLoading &&
+    list.data?.entries.length === 0;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: page-wide drop zone; overlay is announced separately
@@ -441,7 +489,7 @@ function FilesPage() {
             Workspace
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">Files</h1>
-          <Breadcrumb path={path} />
+          <Breadcrumb path={path} q={q} mode={mode} />
         </div>
         <div className="flex items-center gap-2">
           <Tooltip>
@@ -485,15 +533,41 @@ function FilesPage() {
         )}
       >
         <div className="flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] px-3 py-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
               ref={searchRef}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search all files (2+ chars) or filter folder"
+              value={q}
+              onChange={(e) =>
+                navigate({
+                  to: '/files',
+                  search: buildFilesSearch({ path, q: e.target.value, mode }),
+                  replace: true,
+                })
+              }
+              placeholder={
+                mode === 'all' ? 'Search all files (2+ characters)' : 'Filter current folder'
+              }
               leftIcon={<Search />}
               className="max-w-sm"
             />
+            <Select
+              value={mode}
+              onValueChange={(v) =>
+                navigate({
+                  to: '/files',
+                  search: buildFilesSearch({ path, q, mode: v as FilesSearchMode }),
+                  replace: true,
+                })
+              }
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="folder">Current folder</SelectItem>
+                <SelectItem value="all">All files</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={sortMode} onValueChange={(v) => setSortMode(v as SortMode)}>
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="Sort by" />
@@ -508,27 +582,43 @@ function FilesPage() {
               </SelectContent>
             </Select>
           </div>
-          {globalQuery ? (
+          {isGlobalSearch ? (
             <p className="text-xs text-[hsl(var(--muted-foreground))]">
               {globalSearch.isLoading
                 ? 'Searching…'
                 : `${globalSearch.data?.entries.length ?? 0} matches`}
             </p>
           ) : (
+            !allModePrompt &&
             list.data && (
               <p className="text-xs text-[hsl(var(--muted-foreground))]">
                 {list.data.total} total
-                {filter ? ` · ${entries.length} shown` : ''}
+                {folderFilter ? ` · ${entries.length} shown` : ''}
               </p>
             )
           )}
         </div>
-        {list.isLoading && (
+        {!isGlobalSearch && !allModePrompt && list.isLoading && (
           <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
         )}
-        {list.isError && (
+        {isGlobalSearch && globalSearch.isLoading && (
+          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Searching…</p>
+        )}
+        {!isGlobalSearch && !allModePrompt && list.isError && (
           <p className="p-6 text-sm text-[hsl(var(--destructive))]">
             {String((list.error as Error)?.message ?? list.error)}
+          </p>
+        )}
+        {isGlobalSearch && globalSearch.isError && (
+          <p className="p-6 text-sm text-[hsl(var(--destructive))]">
+            {String((globalSearch.error as Error)?.message ?? globalSearch.error)}
+          </p>
+        )}
+        {allModePrompt && (
+          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
+            {q.trim().length === 0
+              ? 'Type at least 2 characters to search all files.'
+              : 'Keep typing — searches require at least 2 characters.'}
           </p>
         )}
         {isEmpty && (
@@ -568,7 +658,9 @@ function FilesPage() {
                       key={entry.path}
                       entry={entry}
                       selected={i === selectedIndex}
-                      onNavigate={(p) => navigate({ to: '/files', search: { path: p } })}
+                      onNavigate={(p) =>
+                        navigate({ to: '/files', search: buildFilesSearch({ path: p, q, mode }) })
+                      }
                       onPreview={setPreviewPath}
                       onRename={onRename}
                       onShare={(filePath) => {
@@ -586,14 +678,18 @@ function FilesPage() {
             </div>
           </DragDropProvider>
         )}
-        {!list.isLoading && !isEmpty && entries.length === 0 && (
-          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
-            No files match your filter.
-          </p>
-        )}
+        {!list.isLoading &&
+          !globalSearch.isLoading &&
+          !isEmpty &&
+          !allModePrompt &&
+          entries.length === 0 && (
+            <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
+              No files match your search.
+            </p>
+          )}
       </section>
 
-      {list.data && !filter && (
+      {list.data && !isGlobalSearch && !allModePrompt && !folderFilter && (
         <div className="flex items-center justify-end gap-2">
           <Button
             variant="outline"
@@ -821,7 +917,7 @@ function FilesPage() {
   );
 }
 
-function Breadcrumb({ path }: { path: string }) {
+function Breadcrumb({ path, q, mode }: { path: string; q: string; mode: FilesSearchMode }) {
   const parts = path ? path.split('/') : [];
   return (
     <nav
@@ -830,7 +926,7 @@ function Breadcrumb({ path }: { path: string }) {
     >
       <Link
         to="/files"
-        search={{ path: '' }}
+        search={buildFilesSearch({ path: '', q, mode })}
         className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
       >
         <Home className="size-3.5" /> Root
@@ -846,7 +942,7 @@ function Breadcrumb({ path }: { path: string }) {
             ) : (
               <Link
                 to="/files"
-                search={{ path: sub }}
+                search={buildFilesSearch({ path: sub, q, mode })}
                 className="truncate rounded-md px-1.5 py-0.5 hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
               >
                 {segment}
@@ -1429,8 +1525,7 @@ function EmptyState({
         {rootLevel ? 'No files yet' : 'This folder is empty'}
       </p>
       <p className="mx-auto mt-1 max-w-sm text-sm text-[hsl(var(--muted-foreground))]">
-        Drop files anywhere on this page, upload from your computer, or drop them in the data folder
-        on disk — they'll appear here.
+        Drop files anywhere on this page or upload from your computer.
       </p>
       <div className="mt-4 flex items-center justify-center gap-2">
         <Button variant="outline" onClick={onCreateFolder} leftIcon={<FolderPlus />}>

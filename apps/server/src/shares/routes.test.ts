@@ -113,6 +113,29 @@ describe('shares routes', () => {
     expect(secondDownload.status).toBe(410);
   });
 
+  it('accepts browser form posts for public share downloads', async () => {
+    const createRes = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        path: 'hello.txt',
+        password: 'form-secret',
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const created = (await createRes.json()) as { token: string };
+
+    const form = new URLSearchParams();
+    form.set('password', 'form-secret');
+    const downloadRes = await request(`/api/shares/public/${created.token}/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: form,
+    });
+    expect(downloadRes.status).toBe(200);
+    expect(await downloadRes.text()).toBe('hello world');
+  });
+
   it('lists shares and supports expiry + revoke', async () => {
     const expiredCreate = await request('/api/shares', {
       method: 'POST',

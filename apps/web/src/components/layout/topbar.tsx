@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Bell, HelpCircle, LogOut, Menu, Monitor, Moon, Search, Sun, User } from 'lucide-react';
+import { Bell, LogOut, Menu, Monitor, Moon, Search, Sun, User } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
@@ -16,8 +16,8 @@ import {
 } from '~/components/ui/dropdown-menu';
 import { Input } from '~/components/ui/input';
 import { Kbd } from '~/components/ui/kbd';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
 import { authClient } from '~/lib/auth-client';
+import { buildFilesSearch } from '~/lib/files-search';
 import {
   clearNotifications,
   listNotifications,
@@ -30,6 +30,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const { theme, setTheme, resolved } = useTheme();
   const session = authClient.useSession();
   const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState('');
   const [notifications, setNotifications] = useState(() => listNotifications());
   const user = session.data?.user;
   const unread = notifications.filter((item) => !item.read).length;
@@ -48,6 +49,13 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
 
   useEffect(() => subscribeNotifications(() => setNotifications(listNotifications())), []);
 
+  function submitSearch() {
+    const q = searchQuery.trim();
+    if (!q) return;
+    navigate({ to: '/files', search: buildFilesSearch({ q, mode: 'all' }) });
+    setSearchQuery('');
+  }
+
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.8)] px-4 backdrop-blur-md sm:px-6">
       <Button
@@ -63,22 +71,21 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
       <div className="relative max-w-md flex-1">
         <Input
           type="search"
-          placeholder="Search files, folders, shares…"
+          placeholder="Search all files…"
           leftIcon={<Search />}
           rightIcon={<Kbd>⌘K</Kbd>}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submitSearch();
+            }
+          }}
         />
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Help">
-              <HelpCircle />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Help and shortcuts</TooltipContent>
-        </Tooltip>
-
         <DropdownMenu
           onOpenChange={(open) => {
             if (open) {
@@ -191,9 +198,6 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
             <DropdownMenuItem onSelect={() => navigate({ to: '/profile' })}>
               <User /> Profile
               <DropdownMenuShortcut>⌘P</DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <HelpCircle /> Support
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={handleSignOut}>

@@ -5,6 +5,7 @@ import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { ConfirmDialog } from '~/components/ui/confirm-dialog';
 import { api } from '~/lib/api';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { pushNotification } from '~/lib/notifications';
 
 export const Route = createFileRoute('/_app/shared')({
@@ -64,7 +65,7 @@ function SharedPage() {
           </p>
         </div>
         <Button asChild>
-          <Link to="/files" search={{ path: '' }}>
+          <Link to="/files" search={FILES_HOME_SEARCH}>
             Share a file
           </Link>
         </Button>
