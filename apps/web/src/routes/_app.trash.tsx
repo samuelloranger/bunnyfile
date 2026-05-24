@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { ConfirmDialog } from '~/components/ui/confirm-dialog';
 import { api } from '~/lib/api';
 import { humanSize } from '~/lib/files';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { pushNotification } from '~/lib/notifications';
 
 export const Route = createFileRoute('/_app/trash')({
@@ -119,7 +120,7 @@ function TrashPage() {
           <div className="px-4 py-8 text-center">
             <p className="text-sm text-[hsl(var(--muted-foreground))]">Trash is empty.</p>
             <Button className="mt-4" variant="outline" asChild>
-              <Link to="/files" search={{ path: '' }}>
+              <Link to="/files" search={FILES_HOME_SEARCH}>
                 Browse files
               </Link>
             </Button>

@@ -8,6 +8,7 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Modal, ModalClose, ModalContent, ModalTitle } from '~/components/ui/modal';
 import { api } from '~/lib/api';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { pushNotification } from '~/lib/notifications';
 import { formatBytes, storageUsageQuery } from '~/lib/storage';
 
@@ -117,7 +118,7 @@ function SettingsPage() {
           ) : null}
           <div className="mt-3">
             <Button variant="outline" size="sm" asChild>
-              <Link to="/files" search={{ path: '' }}>
+              <Link to="/files" search={FILES_HOME_SEARCH}>
                 Browse files
               </Link>
             </Button>

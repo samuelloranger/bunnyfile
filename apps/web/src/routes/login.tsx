@@ -7,6 +7,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { authClient } from '~/lib/auth-client';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { setupStatusQuery } from '~/lib/setup';
 
 export const Route = createFileRoute('/login')({
@@ -25,7 +26,7 @@ function LoginPage() {
 
   if (setup.isLoading || session.isPending) return null;
   if (setup.data?.needsSetup) return <Navigate to="/setup" />;
-  if (session.data?.user) return <Navigate to="/" />;
+  if (session.data?.user) return <Navigate to="/files" search={FILES_HOME_SEARCH} />;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -37,7 +38,7 @@ function LoginPage() {
       setError(error.message ?? 'Invalid email or password');
       return;
     }
-    navigate({ to: '/' });
+    navigate({ to: '/files', search: FILES_HOME_SEARCH });
   }
 
   return (
@@ -119,7 +120,7 @@ function ForgotPasswordForm({ prefillEmail }: { prefillEmail: string }) {
   if (status === 'done') {
     return (
       <p className="rounded-md border border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--success))]">
-        If that account exists, a new password has been printed to the server logs.
+        If that account exists, your instance administrator can provide the new password.
       </p>
     );
   }
@@ -127,7 +128,8 @@ function ForgotPasswordForm({ prefillEmail }: { prefillEmail: string }) {
   return (
     <div className="space-y-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-3">
       <p className="text-xs text-[hsl(var(--muted-foreground))]">
-        A new random password will be printed to the server logs. Ask your admin to check them.
+        A new random password is generated for your account. Contact your instance administrator to
+        receive it.
       </p>
       <form onSubmit={handleReset} className="flex gap-2">
         <Input

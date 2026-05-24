@@ -7,6 +7,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { authClient } from '~/lib/auth-client';
+import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { setupStatusQuery } from '~/lib/setup';
 
 export const Route = createFileRoute('/setup')({
@@ -33,7 +34,7 @@ function SetupPage() {
       name,
       email,
       password,
-      callbackURL: '/',
+      callbackURL: '/files',
     });
     setPending(false);
     if (error) {
@@ -41,7 +42,7 @@ function SetupPage() {
       return;
     }
     await setup.refetch();
-    navigate({ to: '/' });
+    navigate({ to: '/files', search: FILES_HOME_SEARCH });
   }
 
   return (
