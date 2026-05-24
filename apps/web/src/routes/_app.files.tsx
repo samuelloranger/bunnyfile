@@ -22,7 +22,15 @@ import {
   Video,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ChangeEvent,
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { toast } from 'sonner';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -65,6 +73,7 @@ import {
   toUploadProgress,
   uploadButtonLabel,
 } from '~/lib/upload-progress';
+import { useUploadTrigger } from '~/lib/upload-trigger';
 
 type ListedEntry = Entry & { isParentLink?: boolean };
 type SortMode = 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc' | 'date-desc' | 'date-asc';
@@ -318,9 +327,12 @@ function FilesPage() {
     },
   });
 
-  function openPicker() {
+  const openPicker = useCallback(() => {
     inputRef.current?.click();
-  }
+  }, []);
+
+  const { registerOpener } = useUploadTrigger();
+  useEffect(() => registerOpener(openPicker), [registerOpener, openPicker]);
 
   useEffect(() => {
     if (!uploadTrigger) return;

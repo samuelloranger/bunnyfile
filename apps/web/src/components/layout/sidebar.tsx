@@ -17,6 +17,7 @@ import { Separator } from '~/components/ui/separator';
 import { cn } from '~/lib/cn';
 import { buildFilesSearch } from '~/lib/files-search';
 import { formatBytes, storageUsageQuery } from '~/lib/storage';
+import { useUploadTrigger } from '~/lib/upload-trigger';
 
 type NavItem = {
   label: string;
@@ -74,6 +75,7 @@ function NavLink({ item }: { item: NavItem }) {
 
 export function Sidebar({ className }: { className?: string }) {
   const navigate = useNavigate();
+  const { trigger: triggerUpload } = useUploadTrigger();
   const usage = useQuery(storageUsageQuery());
   const usedBytes = usage.data?.usedBytes ?? 0;
   const totalBytes = usage.data?.totalBytes ?? null;
@@ -106,7 +108,13 @@ export function Sidebar({ className }: { className?: string }) {
           className="w-full justify-start"
           size="md"
           leftIcon={<UploadCloud />}
-          onClick={() => navigate({ to: '/files', search: buildFilesSearch({ upload: true }) })}
+          onClick={() => {
+            // Try opening the picker synchronously from this click (preserves
+            // the user-activation gesture that Safari/Firefox require). Fall
+            // back to navigating with ?upload=1 when FilesPage isn't mounted.
+            if (triggerUpload()) return;
+            navigate({ to: '/files', search: buildFilesSearch({ upload: true }) });
+          }}
         >
           Upload files
         </Button>
