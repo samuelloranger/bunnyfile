@@ -41,6 +41,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu';
+import { FilePreviewModal } from '~/components/ui/file-preview-modal';
 import { Input } from '~/components/ui/input';
 import {
   Modal,
@@ -59,7 +60,14 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
 import { api } from '~/lib/api';
 import { cn } from '~/lib/cn';
-import { type Entry, filesQuery, filesSearchQuery, humanSize, humanTime } from '~/lib/files';
+import {
+  type Entry,
+  type FileEntry,
+  filesQuery,
+  filesSearchQuery,
+  humanSize,
+  humanTime,
+} from '~/lib/files';
 import {
   buildFilesSearch,
   type FilesSearchMode,
@@ -173,10 +181,10 @@ function FilesPage() {
     sortMode,
   ]);
 
-  const previewEntry = useMemo(() => {
+  const previewEntry = useMemo((): FileEntry | null => {
     if (!previewPath) return null;
     const found = entries.find((item) => item.path === previewPath);
-    return found && found.kind === 'file' ? found : null;
+    return found?.kind === 'file' ? found : null;
   }, [entries, previewPath]);
 
   useEffect(() => {
@@ -728,9 +736,11 @@ function FilesPage() {
       <FilePreviewModal
         path={previewPath}
         entry={previewEntry}
+        entries={entries}
         onOpenChange={(open) => {
           if (!open) setPreviewPath(null);
         }}
+        onNavigate={setPreviewPath}
       />
 
       <Modal
@@ -1347,95 +1357,6 @@ async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function FilePreviewModal({
-  path,
-  entry,
-  onOpenChange,
-}: {
-  path: string | null;
-  entry: Extract<Entry, { kind: 'file' }> | null;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [textPreview, setTextPreview] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!entry) {
-      setTextPreview(null);
-      return;
-    }
-    if (!entry.mime.startsWith('text/') && entry.mime !== 'application/json') {
-      setTextPreview(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/files/content?path=${encodeURIComponent(entry.path)}`)
-      .then((res) => res.text())
-      .then((text) => {
-        if (cancelled) return;
-        setTextPreview(text.slice(0, 200_000));
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setTextPreview('(Failed to load preview)');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [entry]);
-
-  const open = Boolean(path && entry);
-  const src = entry ? `/api/files/content?path=${encodeURIComponent(entry.path)}` : '';
-
-  return (
-    <Modal open={open} onOpenChange={onOpenChange}>
-      <ModalContent size="xl" className="max-h-[90vh] overflow-hidden">
-        <ModalHeader>
-          <ModalTitle>{entry?.name ?? 'Preview'}</ModalTitle>
-          <ModalDescription>{entry?.mime ?? ''}</ModalDescription>
-        </ModalHeader>
-        {!entry && null}
-        {entry?.mime.startsWith('image/') && (
-          <div className="overflow-auto rounded-lg border border-[hsl(var(--border))]">
-            <img src={src} alt={entry.name} className="mx-auto max-h-[70vh] object-contain" />
-          </div>
-        )}
-        {entry?.mime === 'application/pdf' && (
-          <iframe
-            title={entry.name}
-            src={src}
-            className="h-[70vh] w-full rounded-lg border border-[hsl(var(--border))]"
-          />
-        )}
-        {entry?.mime.startsWith('video/') && (
-          <>
-            {/* biome-ignore lint/a11y/useMediaCaption: arbitrary uploaded videos do not have caption tracks */}
-            <video
-              src={src}
-              controls
-              className="h-[70vh] w-full rounded-lg border border-[hsl(var(--border))] bg-black"
-            />
-          </>
-        )}
-        {(entry?.mime.startsWith('text/') || entry?.mime === 'application/json') && (
-          <pre className="max-h-[70vh] overflow-auto rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-4 text-xs">
-            {textPreview ?? 'Loading preview...'}
-          </pre>
-        )}
-        {entry &&
-          !entry.mime.startsWith('image/') &&
-          entry.mime !== 'application/pdf' &&
-          !entry.mime.startsWith('video/') &&
-          !entry.mime.startsWith('text/') &&
-          entry.mime !== 'application/json' && (
-            <p className="rounded-lg border border-[hsl(var(--border))] p-4 text-sm text-[hsl(var(--muted-foreground))]">
-              No inline preview for this file type yet. Use Download to open it locally.
-            </p>
-          )}
-      </ModalContent>
-    </Modal>
-  );
 }
 
 function iconFor(mime: string, name: string) {
