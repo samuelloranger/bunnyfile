@@ -102,6 +102,14 @@ export function AudioPlayer({ src, name }: { src: string; name: string }) {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={togglePlay}
+                  aria-label={playing ? 'Pause' : 'Play'}
+                  className="rounded-md p-1 hover:bg-[hsl(var(--muted))]"
+                >
+                  {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+                </button>
+                <button
+                  type="button"
                   onClick={toggleMute}
                   aria-label={muted ? 'Unmute' : 'Mute'}
                   className="rounded-md p-1 hover:bg-[hsl(var(--muted))]"
@@ -123,15 +131,6 @@ export function AudioPlayer({ src, name }: { src: string; name: string }) {
                   className="w-20 accent-[hsl(var(--primary))]"
                 />
               </div>
-              <button
-                type="button"
-                onClick={togglePlay}
-                aria-label={playing ? 'Pause' : 'Play'}
-                className="flex items-center gap-1.5 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90"
-              >
-                {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
-                {playing ? 'Pause' : 'Play'}
-              </button>
               <span className="w-24 text-right text-xs tabular-nums text-[hsl(var(--muted-foreground))]">
                 {formatTime(currentTime)} / {formatTime(duration)}
               </span>
