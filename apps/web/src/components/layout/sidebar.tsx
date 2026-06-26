@@ -13,7 +13,6 @@ import type { ReactNode } from 'react';
 import logo from '~/assets/logo-platform-dark.svg';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
-import { Separator } from '~/components/ui/separator';
 import { cn } from '~/lib/cn';
 import { buildFilesSearch } from '~/lib/files-search';
 import { formatBytes, storageUsageQuery } from '~/lib/storage';
@@ -88,20 +87,18 @@ export function Sidebar({ className }: { className?: string }) {
   return (
     <aside
       className={cn(
-        'flex h-full w-full flex-col bg-[hsl(var(--surface))]',
-        'border-r border-[hsl(var(--border))]',
+        'flex h-full w-full flex-col bg-[hsl(var(--surface)/0.65)] backdrop-blur-md',
+        'border-r border-[hsl(var(--border)/0.5)]',
         className,
       )}
     >
-      <div className="flex h-14 items-center gap-2 px-4">
+      <div className="flex h-14 items-center gap-2 px-4 border-b border-[hsl(var(--border)/0.5)]">
         <img src={logo} alt="BunnyFile" className="size-8 rounded-lg shadow-sm" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold leading-tight">BunnyFile</p>
           <p className="truncate text-[11px] text-[hsl(var(--muted-foreground))]">Files, shared.</p>
         </div>
       </div>
-
-      <Separator />
 
       <div className="px-3 py-3">
         <Button
@@ -141,10 +138,10 @@ export function Sidebar({ className }: { className?: string }) {
         </ul>
       </nav>
 
-      <div className="border-t border-[hsl(var(--border))] p-3">
-        <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-3">
+      <div className="border-t border-[hsl(var(--border)/0.5)] p-3">
+        <div className="rounded-xl border border-[hsl(var(--border)/0.5)] bg-[hsl(var(--surface-2)/0.4)] backdrop-blur-sm p-3">
           <p className="text-xs font-medium">Storage</p>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--muted))]">
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--muted)/0.5)]">
             <div
               className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--primary))] to-[hsl(var(--accent))]"
               style={{ width: `${pct}%` }}

@@ -57,7 +57,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.8)] px-4 backdrop-blur-md sm:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-[hsl(var(--border)/0.5)] bg-[hsl(var(--surface)/0.65)] px-4 backdrop-blur-md sm:px-6">
       <Button
         variant="ghost"
         size="icon"

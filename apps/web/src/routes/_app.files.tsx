@@ -11,6 +11,8 @@ import {
   FolderPlus,
   Home,
   Image as ImageIcon,
+  LayoutGrid,
+  List,
   MoreHorizontal,
   Music2,
   Pencil,
@@ -97,6 +99,7 @@ function FilesPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [offset, setOffset] = useState(0);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
   const [sortMode, setSortMode] = useState<SortMode>('name-asc');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -500,6 +503,36 @@ function FilesPage() {
           <Breadcrumb path={path} q={q} mode={mode} />
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-0.5 mr-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setViewMode('grid')}
+              className={cn(
+                'size-8 !p-0 rounded-md transition-all duration-150',
+                viewMode === 'grid'
+                  ? 'bg-[hsl(var(--surface))] shadow-sm text-[hsl(var(--primary))]'
+                  : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
+              )}
+              aria-label="Grid view"
+            >
+              <LayoutGrid className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setViewMode('list')}
+              className={cn(
+                'size-8 !p-0 rounded-md transition-all duration-150',
+                viewMode === 'list'
+                  ? 'bg-[hsl(var(--surface))] shadow-sm text-[hsl(var(--primary))]'
+                  : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
+              )}
+              aria-label="List view"
+            >
+              <List className="size-4" />
+            </Button>
+          </div>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -534,13 +567,13 @@ function FilesPage() {
 
       <section
         className={cn(
-          'overflow-hidden rounded-xl border bg-[hsl(var(--surface))] transition-colors',
+          'overflow-hidden rounded-2xl border bg-[hsl(var(--surface)/0.4)] backdrop-blur-md transition-all duration-300',
           dragActive
-            ? 'border-[hsl(var(--primary))] ring-4 ring-[hsl(var(--primary)/0.15)]'
-            : 'border-[hsl(var(--border))]',
+            ? 'border-[hsl(var(--primary))] ring-4 ring-[hsl(var(--primary)/0.15)] bg-[hsl(var(--surface)/0.65)]'
+            : 'border-[hsl(var(--border)/0.5)] shadow-md shadow-black/5 hover:shadow-lg',
         )}
       >
-        <div className="flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] px-3 py-2">
+        <div className="flex items-center justify-between border-b border-[hsl(var(--border)/0.5)] bg-[hsl(var(--surface-2)/0.3)] px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
             <Input
               ref={searchRef}
@@ -650,40 +683,64 @@ function FilesPage() {
               void rename.mutateAsync({ path: source.path, newPath });
             }}
           >
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] text-left text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-                    <Th className="w-full">Name</Th>
-                    <Th>Size</Th>
-                    <Th>Modified</Th>
-                    <Th className="text-right">Actions</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((entry, i) => (
-                    <EntryRow
-                      key={entry.path}
-                      entry={entry}
-                      selected={i === selectedIndex}
-                      onNavigate={(p) =>
-                        navigate({ to: '/files', search: buildFilesSearch({ path: p, q, mode }) })
-                      }
-                      onPreview={setPreviewPath}
-                      onRename={onRename}
-                      onShare={(filePath) => {
-                        const name = filePath.split('/').at(-1) ?? filePath;
-                        setShareTarget({ path: filePath, name });
-                        setShareDays('7');
-                        setSharePassword('');
-                        setShareMaxDownloads('');
-                        setShareUrl(null);
-                      }}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {viewMode === 'list' ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] text-left text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                      <Th className="w-full">Name</Th>
+                      <Th>Size</Th>
+                      <Th>Modified</Th>
+                      <Th className="text-right">Actions</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry, i) => (
+                      <EntryRow
+                        key={entry.path}
+                        entry={entry}
+                        selected={i === selectedIndex}
+                        onNavigate={(p) =>
+                          navigate({ to: '/files', search: buildFilesSearch({ path: p, q, mode }) })
+                        }
+                        onPreview={setPreviewPath}
+                        onRename={onRename}
+                        onShare={(filePath) => {
+                          const name = filePath.split('/').at(-1) ?? filePath;
+                          setShareTarget({ path: filePath, name });
+                          setShareDays('7');
+                          setSharePassword('');
+                          setShareMaxDownloads('');
+                          setShareUrl(null);
+                        }}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 bg-transparent">
+                {entries.map((entry, i) => (
+                  <EntryCard
+                    key={entry.path}
+                    entry={entry}
+                    selected={i === selectedIndex}
+                    onNavigate={(p) =>
+                      navigate({ to: '/files', search: buildFilesSearch({ path: p, q, mode }) })
+                    }
+                    onPreview={setPreviewPath}
+                    onShare={(filePath) => {
+                      const name = filePath.split('/').at(-1) ?? filePath;
+                      setShareTarget({ path: filePath, name });
+                      setShareDays('7');
+                      setSharePassword('');
+                      setShareMaxDownloads('');
+                      setShareUrl(null);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </DragDropProvider>
         )}
         {!list.isLoading &&
@@ -1455,6 +1512,254 @@ function EmptyState({
         <Button onClick={onUpload} leftIcon={<UploadCloud />}>
           Upload a file
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function EntryCard({
+  entry,
+  onNavigate,
+  onPreview,
+  onShare,
+  selected,
+}: {
+  entry: ListedEntry;
+  onNavigate: (path: string) => void;
+  onPreview: (path: string) => void;
+  onShare: (path: string) => void;
+  selected: boolean;
+}) {
+  if (entry.kind === 'dir') {
+    return <DirectoryCard entry={entry} selected={selected} onNavigate={onNavigate} />;
+  }
+
+  return <FileCard entry={entry} selected={selected} onPreview={onPreview} onShare={onShare} />;
+}
+
+function DirectoryCard({
+  entry,
+  selected,
+  onNavigate,
+}: {
+  entry: Extract<ListedEntry, { kind: 'dir' }>;
+  selected: boolean;
+  onNavigate: (path: string) => void;
+}) {
+  const qc = useQueryClient();
+  const del = useMutation({
+    mutationFn: async () => {
+      const { error } = await api.api.files.folder.delete({ path: entry.path });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['trash'] });
+      qc.invalidateQueries({ queryKey: ['storage-usage'] });
+      pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });
+    },
+    onError: (err: unknown) => {
+      pushNotification({
+        kind: 'error',
+        title: `Could not move ${entry.name} to trash`,
+        body: err instanceof Error ? err.message : undefined,
+      });
+    },
+  });
+  const droppableId = dndId('dir', entry.path);
+  const { ref: dropRef, isDropTarget } = useDroppable({ id: droppableId });
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: clickable dashboard folder card
+    // biome-ignore lint/a11y/useKeyWithClickEvents: click handler is for visual dashboard card
+    <div
+      ref={dropRef}
+      onClick={() => onNavigate(entry.path)}
+      className={cn(
+        'cursor-pointer relative flex flex-col rounded-2xl border p-5 transition-all duration-200',
+        'bg-[hsl(var(--surface-2)/0.35)] border-[hsl(var(--border)/0.4)] hover:border-[hsl(var(--primary)/0.4)]',
+        'hover:shadow-lg hover:-translate-y-0.5',
+        selected && 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)]',
+        isDropTarget && 'bg-[hsl(var(--primary)/0.1)] border-[hsl(var(--primary))]',
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex size-10 items-center justify-center rounded-xl bg-[hsl(var(--accent)/0.15)] text-[hsl(var(--accent))]">
+          <Folder className="size-5" />
+        </div>
+        {!entry.isParentLink && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-8"
+                aria-label={`More actions for ${entry.name}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <ConfirmDialog
+                trigger={
+                  <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
+                    <Trash2 /> Move to trash
+                  </DropdownMenuItem>
+                }
+                title={`Move "${entry.name}" to trash?`}
+                description="The folder and all its contents will leave My files until restored or permanently deleted."
+                confirmLabel="Move to trash"
+                tone="destructive"
+                onConfirm={() => del.mutateAsync()}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+      <div className="mt-4 min-w-0">
+        <h3 className="truncate font-semibold text-sm leading-snug">
+          {entry.isParentLink ? '..' : entry.name}
+        </h3>
+        <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
+          {entry.isParentLink ? 'Parent folder' : `${entry.itemCount} items`}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function FileCard({
+  entry,
+  selected,
+  onPreview,
+  onShare,
+}: {
+  entry: Extract<ListedEntry, { kind: 'file' }>;
+  selected: boolean;
+  onPreview: (path: string) => void;
+  onShare: (path: string) => void;
+}) {
+  const qc = useQueryClient();
+  const del = useMutation({
+    mutationFn: async () => {
+      const { error } = await api.api.files.delete({ path: entry.path });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['trash'] });
+      qc.invalidateQueries({ queryKey: ['storage-usage'] });
+      pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });
+    },
+    onError: (err: unknown) => {
+      pushNotification({
+        kind: 'error',
+        title: `Could not move ${entry.name} to trash`,
+        body: err instanceof Error ? err.message : undefined,
+      });
+    },
+  });
+  const draggableId = dndId('file', entry.path);
+  const { ref: dragRef, isDragging } = useDraggable({ id: draggableId });
+  const downloadHref = `/api/files/content?path=${encodeURIComponent(entry.path)}`;
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: clickable dashboard file card
+    <div
+      ref={dragRef}
+      onDoubleClick={() => onPreview(entry.path)}
+      className={cn(
+        'cursor-pointer relative flex flex-col rounded-2xl border p-5 transition-all duration-200',
+        'bg-[hsl(var(--surface-2)/0.35)] border-[hsl(var(--border)/0.4)] hover:border-[hsl(var(--primary)/0.4)]',
+        'hover:shadow-lg hover:-translate-y-0.5',
+        selected && 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)]',
+        isDragging && 'opacity-50',
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex size-10 items-center justify-center overflow-hidden rounded-xl bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">
+          {entry.mime.startsWith('image/') || entry.mime === 'application/pdf' ? (
+            <img
+              src={`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}`}
+              alt=""
+              loading="lazy"
+              className="size-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          ) : (
+            iconFor(entry.mime, entry.name)
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <a
+            href={downloadHref}
+            download={entry.name}
+            className="inline-flex size-8 items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
+            aria-label={`Download ${entry.name}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Download className="size-4" />
+          </a>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-8"
+                aria-label={`More actions for ${entry.name}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem
+                onSelect={(e) => e.preventDefault()}
+                onClick={async () => {
+                  const copied = await copyText(entry.path);
+                  if (copied) {
+                    toast.success('Path copied');
+                  } else {
+                    toast.error('Failed to copy path');
+                  }
+                }}
+              >
+                <Copy /> Copy path
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(e) => e.preventDefault()}
+                onClick={() => onShare(entry.path)}
+              >
+                <Share2 /> Share
+              </DropdownMenuItem>
+              <ConfirmDialog
+                trigger={
+                  <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
+                    <Trash2 /> Move to trash
+                  </DropdownMenuItem>
+                }
+                title={`Move "${entry.name}" to trash?`}
+                description="The file will leave My files until restored or permanently deleted."
+                confirmLabel="Move to trash"
+                tone="destructive"
+                onConfirm={() => del.mutateAsync()}
+              />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+      <div className="mt-4 min-w-0 flex-1">
+        <h3 className="truncate font-semibold text-sm leading-snug">{entry.name}</h3>
+        <p className="mt-1 truncate text-[11px] text-[hsl(var(--muted-foreground))]">
+          {displayMimeLabel(entry.mime, entry.name)}
+        </p>
+      </div>
+      <div className="mt-4 flex items-center justify-between border-t border-[hsl(var(--border)/0.5)] pt-3 text-[11px] text-[hsl(var(--muted-foreground))]">
+        <span>{humanSize(entry.size)}</span>
+        <span>{humanTime(entry.mtimeMs)}</span>
       </div>
     </div>
   );
