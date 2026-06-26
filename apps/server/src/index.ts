@@ -109,11 +109,21 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
     }
     const candidate = join(WEB_DIST, url.pathname);
     try {
-      if (statSync(candidate).isFile()) return Bun.file(candidate);
+      if (statSync(candidate).isFile()) {
+        if (url.pathname.startsWith('/assets/')) {
+          set.headers['cache-control'] = 'public, max-age=31536000, immutable';
+        } else {
+          set.headers['cache-control'] = 'no-cache';
+        }
+        return Bun.file(candidate);
+      }
     } catch {
       // fall through to SPA index
     }
-    if (existsSync(INDEX_HTML)) return Bun.file(INDEX_HTML);
+    if (existsSync(INDEX_HTML)) {
+      set.headers['cache-control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate';
+      return Bun.file(INDEX_HTML);
+    }
     set.status = 404;
     return { error: 'web build not found — run `bun run build` in apps/web' };
   });
