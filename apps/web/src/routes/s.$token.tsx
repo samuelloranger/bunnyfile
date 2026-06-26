@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { Clock, Download, LockKeyhole, ShieldAlert } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import logo from '~/assets/logo-platform-dark.svg';
+import logo from '~/assets/logo-transparent.svg';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -51,7 +51,7 @@ function PublicSharePage() {
     <div className="flex min-h-dvh flex-col bg-[hsl(var(--background))]">
       <header className="border-b border-[hsl(var(--border))] bg-[hsl(var(--surface))] px-4 py-4 sm:px-6">
         <div className="mx-auto flex max-w-xl items-center gap-3">
-          <img src={logo} alt="BunnyFile" className="size-9 rounded-lg shadow-sm" />
+          <img src={logo} alt="BunnyFile" className="size-11 shrink-0" />
           <div>
             <p className="text-sm font-semibold leading-tight">BunnyFile</p>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">Shared file</p>

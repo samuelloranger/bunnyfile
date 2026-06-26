@@ -10,7 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import logo from '~/assets/logo-platform-dark.svg';
+import logo from '~/assets/logo-transparent.svg';
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { cn } from '~/lib/cn';
@@ -93,7 +93,7 @@ export function Sidebar({ className }: { className?: string }) {
       )}
     >
       <div className="flex h-14 items-center gap-2 px-4 border-b border-[hsl(var(--border)/0.5)]">
-        <img src={logo} alt="BunnyFile" className="size-8 rounded-lg shadow-sm" />
+        <img src={logo} alt="BunnyFile" className="size-10 shrink-0" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold leading-tight">BunnyFile</p>
           <p className="truncate text-[11px] text-[hsl(var(--muted-foreground))]">Files, shared.</p>

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Navigate, Outlet } from '@tanstack/react-router';
-import logo from '~/assets/logo-platform-dark.svg';
+import logo from '~/assets/logo-transparent.svg';
 import { AppShell } from '~/components/layout/app-shell';
 import { authClient } from '~/lib/auth-client';
 import { setupStatusQuery } from '~/lib/setup';
@@ -28,7 +28,7 @@ function SplashScreen() {
   return (
     <div className="flex h-dvh w-full items-center justify-center bg-[hsl(var(--background))]">
       <div className="flex flex-col items-center gap-3 text-[hsl(var(--muted-foreground))]">
-        <img src={logo} alt="BunnyFile" className="size-10 rounded-xl shadow-sm" />
+        <img src={logo} alt="BunnyFile" className="size-12 shrink-0 animate-pulse" />
         <p className="text-xs">Loading…</p>
       </div>
     </div>

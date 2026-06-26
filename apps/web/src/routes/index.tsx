@@ -9,7 +9,7 @@ import {
   Image as ImageIcon,
   Share2,
 } from 'lucide-react';
-import logo from '~/assets/logo-platform-dark.svg';
+import logo from '~/assets/logo-transparent.svg';
 import { Button } from '~/components/ui/button';
 import { authClient } from '~/lib/auth-client';
 import { FILES_HOME_SEARCH } from '~/lib/files-search';
@@ -36,7 +36,7 @@ function SplashScreen() {
   return (
     <div className="flex h-dvh w-full items-center justify-center bg-[hsl(var(--background))]">
       <div className="flex flex-col items-center gap-3 text-[hsl(var(--muted-foreground))]">
-        <img src={logo} alt="BunnyFile" className="size-10 rounded-xl shadow-sm" />
+        <img src={logo} alt="BunnyFile" className="size-12 shrink-0 animate-pulse" />
         <p className="text-xs">Loading…</p>
       </div>
     </div>
@@ -53,7 +53,7 @@ function LandingPage({ needsSetup }: { needsSetup: boolean }) {
 
       <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 sm:px-6">
         <div className="flex items-center gap-3">
-          <img src={logo} alt="BunnyFile" className="size-10 rounded-xl shadow-sm" />
+          <img src={logo} alt="BunnyFile" className="size-12 shrink-0" />
           <div>
             <p className="text-sm font-semibold leading-tight">BunnyFile</p>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">Files, shared. That's it.</p>
