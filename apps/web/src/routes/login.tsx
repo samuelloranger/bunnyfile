@@ -104,23 +104,17 @@ function ForgotPasswordForm({ prefillEmail }: { prefillEmail: string }) {
   async function handleReset(e: FormEvent) {
     e.preventDefault();
     setStatus('pending');
-    try {
-      const res = await fetch('/api/users/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetEmail }),
-        credentials: 'include',
-      });
-      setStatus(res.ok ? 'done' : 'err');
-    } catch {
-      setStatus('err');
-    }
+    const { error } = await authClient.requestPasswordReset({
+      email: resetEmail,
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setStatus(error ? 'err' : 'done');
   }
 
   if (status === 'done') {
     return (
       <p className="rounded-md border border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--success))]">
-        If that account exists, your instance administrator can provide the new password.
+        If that account exists, a password-reset link is on its way. Check your email.
       </p>
     );
   }
@@ -128,8 +122,7 @@ function ForgotPasswordForm({ prefillEmail }: { prefillEmail: string }) {
   return (
     <div className="space-y-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-3">
       <p className="text-xs text-[hsl(var(--muted-foreground))]">
-        A new random password is generated for your account. Contact your instance administrator to
-        receive it.
+        Enter your email and we'll send a link to reset your password.
       </p>
       <form onSubmit={handleReset} className="flex gap-2">
         <Input

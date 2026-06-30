@@ -1,6 +1,9 @@
 # Plan — Password reset flow
 
-**Status:** planned, not implemented.
+**Status:** ✅ implemented. Shipped via better-auth `sendResetPassword` + `apps/server/src/email/mailer.ts`
+(SMTP with stdout fallback), SPA routes `forgot` (in `login.tsx`) + `reset-password.tsx`, rate-limited
+on `/api/auth/request-password-reset`. Covered by `apps/server/src/auth/reset-password.test.ts`.
+This doc is kept as the design record.
 **Why:** PLAN.md open question #6 + adoption blocker — today a forgotten password needs admin
 intervention (manual DB edit / delete+reinvite). First locked-out user churns. Last real *feature*
 gap before public launch.

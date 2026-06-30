@@ -166,30 +166,6 @@ export const usersRoutes = new Elysia({ name: 'users' })
     },
   )
 
-  // Forgot password — generates a random password, updates the DB, and logs
-  // it to stdout so the admin can read it from container logs.
-  .post(
-    '/api/users/forgot-password',
-    async ({ body }) => {
-      const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, body.email));
-      if (!row) {
-        // Don't reveal whether the email exists.
-        return { ok: true as const };
-      }
-
-      const newPassword = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
-      const hash = await Bun.password.hash(newPassword, { algorithm: 'argon2id' });
-
-      await db.update(account).set({ password: hash }).where(eq(account.userId, row.id));
-
-      console.log(`[forgot-password] reset for ${body.email} — new password: ${newPassword}`);
-      return { ok: true as const };
-    },
-    {
-      body: t.Object({ email: t.String({ format: 'email' }) }),
-    },
-  )
-
   // Change own email — requires current password for confirmation.
   .put(
     '/api/users/me/email',

@@ -65,6 +65,7 @@ Copy `deploy/compose/.env.example` → `.env` and set `BETTER_AUTH_SECRET` befor
 Designed to be safe behind a reverse proxy. What's in the box:
 
 - **Auth:** native email/password via [better-auth](https://better-auth.com) (scrypt hashing, cookie sessions, 30-day expiry). First signup becomes admin; admins manage users on `/people`. Alternatively run in **forward-auth** mode behind Tinyauth/Caddy — one mode at a time.
+- **Password reset:** self-service email-link flow (1-hour token, all sessions revoked on reset, rate-limited, no email enumeration). Configure SMTP (`SMTP_HOST` etc.) to send mail; without it, reset links are logged to stdout for an admin to relay.
 - **Origin policy:** a single trusted-origin allowlist (localhost + RFC1918 LAN + explicit `WEB_ORIGIN` / env entries) backs both the CSRF check and CORS, so they can't disagree.
 - **Share links:** optional password, expiry, and max-download count; expired/exhausted links render a 410. Public share access is rate-limited (in-memory token bucket).
 - **Data integrity:** every file write is write-then-rename with a checksum recorded in SQLite; integration tests verify byte-exact round trips.
@@ -75,7 +76,7 @@ Designed to be safe behind a reverse proxy. What's in the box:
 - Terminate TLS at a reverse proxy (see `deploy/compose/caddy.yml`) — don't expose `:3901` directly.
 - Restrict cross-origin access with `WEB_ORIGIN` when serving from a custom domain.
 
-> **Note:** self-service password reset is not implemented yet ([plan](./docs/plans/password-reset.md)) — a forgotten password currently requires an admin to reset it. Found a vulnerability? Open a private security advisory on GitHub rather than a public issue.
+> Found a vulnerability? Open a private security advisory on GitHub rather than a public issue.
 
 ## S3-compatible API
 
@@ -152,7 +153,7 @@ bun run docker:down
 |---|---|
 | [`docs/s3-compatibility.md`](./docs/s3-compatibility.md) | S3 client setup, supported ops, limitations |
 | [`docs/migrating-from-nextcloud.md`](./docs/migrating-from-nextcloud.md) | Files-only migration guide |
-| [`docs/plans/password-reset.md`](./docs/plans/password-reset.md) | Planned self-service password reset flow |
+| [`docs/plans/password-reset.md`](./docs/plans/password-reset.md) | Self-service password reset — design + status |
 
 ## Roadmap
 
