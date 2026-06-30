@@ -34,4 +34,4 @@ createRoot(rootEl).render(
   </StrictMode>,
 );
 
-(window as any).__BUNNYFILE_CACHE_BUST__ = "2026-06-26T11:53:00";
+(window as any).__BUNNYFILE_CACHE_BUST__ = '2026-06-26T11:53:00';
