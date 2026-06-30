@@ -57,6 +57,9 @@ export function VideoViewer({ src, name }: { src: string; name: string }) {
     if (!v) return;
     const val = Number(e.target.value);
     v.volume = val;
+    // Keep the element's muted state in sync — otherwise raising the slider
+    // while muted leaves playback silent even though the UI shows unmuted.
+    v.muted = val === 0;
     setVolume(val);
     setMuted(val === 0);
   }

@@ -57,6 +57,8 @@ export function AudioPlayer({ src, name }: { src: string; name: string }) {
     if (!a) return;
     const val = Number(e.target.value);
     a.volume = val;
+    // Keep muted in sync so raising the slider while muted actually plays.
+    a.muted = val === 0;
     setVolume(val);
     setMuted(val === 0);
   }

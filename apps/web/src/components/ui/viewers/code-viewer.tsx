@@ -111,9 +111,16 @@ export function CodeViewer({
   }, [src, name]);
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(rawRef.current);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    // navigator.clipboard is undefined on insecure (plain-HTTP) origins — guard
+    // so the button doesn't throw on a LAN deploy without TLS.
+    if (!navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(rawRef.current);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard write denied — ignore
+    }
   }
 
   return (
