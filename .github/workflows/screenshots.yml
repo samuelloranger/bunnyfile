@@ -1,0 +1,73 @@
+name: Screenshots
+
+# Regenerates README screenshots against seeded demo data on every release,
+# and commits them back to the default branch. Manually runnable too.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: screenshots
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    env:
+      SP: ${{ runner.temp }}/shot
+      SERVER_PORT: '3955'
+      SERVER_HOST: 127.0.0.1
+      SCREENSHOT_URL: http://localhost:3955
+      BETTER_AUTH_SECRET: ci-screenshot-secret-0123456789abcdef
+      WEB_ORIGIN: http://localhost:3955
+      BETTER_AUTH_URL: http://localhost:3955
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3'
+
+      - run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Build web SPA
+        run: bun run --filter @bunnyfile/web build
+
+      - name: Seed demo data
+        env:
+          DATA_DIR: ${{ runner.temp }}/shot/data
+        run: bun scripts/screenshot/seed.ts
+
+      - name: Start server, capture screenshots
+        env:
+          DATA_DIR: ${{ runner.temp }}/shot/data
+          DB_PATH: ${{ runner.temp }}/shot/shot.sqlite
+        run: |
+          bun apps/server/src/index.ts > "$SP/server.log" 2>&1 &
+          for i in $(seq 1 30); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' "$SCREENSHOT_URL/api/health")" = "200" ] && break
+            sleep 1
+          done
+          bun scripts/screenshot/shots.ts
+
+      - name: Commit screenshots if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots
+          if git diff --cached --quiet; then
+            echo "No screenshot changes."
+            exit 0
+          fi
+          git commit -m "chore(screenshots): regenerate for ${{ github.event.release.tag_name || github.sha }} [skip ci]"
+          git push origin HEAD:${{ github.event.repository.default_branch }}

@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "description": "Lightweight self-hosted file hosting and sharing, built on Bun.",
+  "license": "AGPL-3.0-only",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.4.12",
     "@types/bun": "1.3.12",
+    "playwright": "1.61.1",
     "typescript": "6.0.3"
   },
   "engines": {
