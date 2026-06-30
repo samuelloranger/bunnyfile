@@ -29,7 +29,10 @@ export async function deleteFileSearch(path: string): Promise<void> {
 }
 
 export async function deleteFileSearchPrefix(path: string): Promise<void> {
-  db.run(sql`DELETE FROM file_search WHERE path = ${path} OR path LIKE ${`${path}/%`}`);
+  // Escape LIKE wildcards so a folder named e.g. `a_b` or `50%` doesn't
+  // over-match unrelated sibling paths and wrongly drop them from the index.
+  const likePrefix = `${path.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}/%`;
+  db.run(sql`DELETE FROM file_search WHERE path = ${path} OR path LIKE ${likePrefix} ESCAPE '\\'`);
 }
 
 export async function rebuildFileSearchIndex(): Promise<number> {

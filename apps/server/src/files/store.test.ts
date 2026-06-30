@@ -7,15 +7,8 @@ import { join } from 'node:path';
 const dataDir = await mkdtemp(join(tmpdir(), 'bunnyfile-store-test-'));
 process.env.DATA_DIR = dataDir;
 
-const {
-  PathError,
-  createFolder,
-  isUploadTmpFile,
-  listImmediateDirectories,
-  moveFile,
-  openStream,
-  writeUpload,
-} = await import('./store');
+const { PathError, createFolder, listImmediateDirectories, moveFile, openStream, writeUpload } =
+  await import('./store');
 
 function streamFromText(text: string): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -62,15 +55,6 @@ describe('writeUpload integrity', () => {
     await writeUpload(rel, streamFromText('done'));
     const names = await readdir(dataDir);
     expect(names.some((n) => n.includes('.tmp-'))).toBe(false);
-  });
-});
-
-describe('isUploadTmpFile', () => {
-  it('matches the writer tmp naming, not real files', () => {
-    expect(isUploadTmpFile('photo.jpg.tmp-1a2b3c4d')).toBe(true);
-    expect(isUploadTmpFile('legacy.tmp')).toBe(true);
-    expect(isUploadTmpFile('photo.jpg')).toBe(false);
-    expect(isUploadTmpFile('notes.tmp-draft')).toBe(false); // suffix not 8 hex
   });
 });
 

@@ -153,6 +153,36 @@ describe('files routes', () => {
     expect(typeof rescan.updated).toBe('number');
     expect(typeof rescan.removed).toBe('number');
   });
+
+  it('serves file content with stored-XSS-neutralizing headers', async () => {
+    const fd = new FormData();
+    fd.set('path', 'page.html');
+    fd.set('file', new File(['<script>alert(1)</script>'], 'page.html', { type: 'text/html' }));
+    await request('/api/files/upload', { method: 'POST', body: fd });
+
+    const res = await request('/api/files/content?path=page.html');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+  });
+
+  it('rejects reserved internal prefixes from the files API', async () => {
+    // Listing, creating, and deleting under s3/ / .multipart must be refused so
+    // the web file API cannot touch the S3 object tree or scratch dirs.
+    expect((await request('/api/files?prefix=s3')).status).toBe(400);
+    const createRes = await request('/api/files/folder', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 's3/evil' }),
+    });
+    expect(createRes.status).toBe(400);
+    const deleteRes = await request('/api/files', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: '.multipart' }),
+    });
+    expect(deleteRes.status).toBe(400);
+  });
 });
 
 afterAll(async () => {

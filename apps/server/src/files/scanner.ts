@@ -6,7 +6,7 @@ import { fileIndex } from '../db/schema';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
 import { deleteFileSearch, upsertFileSearch } from './search';
-import { DATA_ROOT, hashOnDisk, isUploadTmpFile } from './store';
+import { DATA_ROOT, hashOnDisk } from './store';
 
 /**
  * Walk DATA_ROOT, reconcile against file_index.
@@ -30,8 +30,14 @@ type DiskEntry = {
 async function* walk(abs: string, rel: string): AsyncGenerator<DiskEntry> {
   const entries = await readdir(abs, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue; // skip dotfiles
-    if (isUploadTmpFile(entry.name)) continue; // in-flight / orphaned upload temp files
+    // Dotfiles are skipped — this also covers in-flight/orphaned upload temp
+    // files, which are written dot-prefixed (see writeUpload in store.ts), and
+    // the `.trash` / `.multipart` internal dirs.
+    if (entry.name.startsWith('.')) continue;
+    // The S3 object tree lives at the root `s3/` dir and is owned by the S3
+    // API, not the user file index. Don't index it. (A user folder named `s3`
+    // nested deeper is fine — only the root one is reserved.)
+    if (rel === '' && entry.name === 's3') continue;
     const nextAbs = `${abs}${sep}${entry.name}`;
     const nextRel = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {

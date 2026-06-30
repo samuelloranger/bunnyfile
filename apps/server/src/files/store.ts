@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { trackUpload } from '../inflight';
 import { resolveInRoot, safeRelPath } from './paths';
 
@@ -34,14 +34,6 @@ export function absFromRelOrThrow(raw: string): string {
   return abs(rel);
 }
 
-// In-flight uploads are written to `<dest>.tmp-<8 hex>` before the atomic
-// rename. The scanner uses this to skip orphan temp files left by a crashed
-// upload so they never show up as real files. Keep in sync with `doWriteUpload`.
-const UPLOAD_TMP_RE = /\.tmp-[0-9a-f]{8}$/;
-export function isUploadTmpFile(name: string): boolean {
-  return name.endsWith('.tmp') || UPLOAD_TMP_RE.test(name);
-}
-
 export function writeUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
@@ -56,7 +48,14 @@ async function doWriteUpload(
   const destination = absFromRelOrThrow(rel);
   await mkdir(dirname(destination), { recursive: true });
 
-  const tmp = `${destination}.tmp-${crypto.randomUUID().slice(0, 8)}`;
+  // Dot-prefixed temp in the same directory: the scanner already skips all
+  // dotfiles, so an in-flight/orphaned temp is never indexed — and the marker
+  // can't collide with a *visible* user path (a user file like
+  // `report.tmp-1a2b3c4d` stays listed). Same dir keeps the rename atomic.
+  const tmp = join(
+    dirname(destination),
+    `.${basename(destination)}.tmp-${crypto.randomUUID().slice(0, 8)}`,
+  );
   const sha256Hash = createHash('sha256');
   const md5Hash = createHash('md5');
   let size = 0;

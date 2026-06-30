@@ -13,6 +13,14 @@ import { bodyStream } from './chunked';
 import { s3ErrorXml, xmlDocument } from './xml';
 
 const MULTIPART_DIR = resolve(DATA_ROOT, '.multipart');
+
+// uploadIds are server-minted UUIDs. Validating the format before using one in
+// a filesystem path stops a crafted id (e.g. "../../..") from escaping
+// MULTIPART_DIR — a UUID contains no path separators or "..".
+const UPLOAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUploadId(id: string): boolean {
+  return UPLOAD_ID_RE.test(id);
+}
 const S3_XMLNS = 'http://s3.amazonaws.com/doc/2006-03-01/';
 
 function xmlResponse(body: string, status = 200): Response {
@@ -255,6 +263,10 @@ async function abortMultipartUpload(
   _set: { status?: number | string },
   uploadId: string,
 ): Promise<Response> {
+  // Reject ids that aren't well-formed UUIDs before any filesystem use.
+  if (!isValidUploadId(uploadId)) {
+    return new Response(null, { status: 204 });
+  }
   const parts = db
     .select({ path: s3MultipartPart.path })
     .from(s3MultipartPart)
