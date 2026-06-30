@@ -18,7 +18,6 @@ jobs:
   capture:
     runs-on: ubuntu-latest
     env:
-      SP: ${{ runner.temp }}/shot
       SERVER_PORT: '3955'
       SERVER_HOST: 127.0.0.1
       SCREENSHOT_URL: http://localhost:3955
@@ -53,7 +52,7 @@ jobs:
           DATA_DIR: ${{ runner.temp }}/shot/data
           DB_PATH: ${{ runner.temp }}/shot/shot.sqlite
         run: |
-          bun apps/server/src/index.ts > "$SP/server.log" 2>&1 &
+          bun apps/server/src/index.ts > "$RUNNER_TEMP/server.log" 2>&1 &
           for i in $(seq 1 30); do
             [ "$(curl -s -o /dev/null -w '%{http_code}' "$SCREENSHOT_URL/api/health")" = "200" ] && break
             sleep 1
