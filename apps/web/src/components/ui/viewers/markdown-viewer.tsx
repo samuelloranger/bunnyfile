@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
+import remarkGfm from 'remark-gfm';
 import { cn } from '~/lib/cn';
 
 const MAX_BYTES = 200_000;
@@ -51,6 +52,7 @@ export function MarkdownViewer({ src }: { src: string }) {
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
         ) : tab === 'rendered' ? (
           <Markdown
+            remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeSanitize]}
             components={{
               h1: ({ children }) => (
