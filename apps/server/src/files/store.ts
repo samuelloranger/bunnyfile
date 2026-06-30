@@ -34,6 +34,15 @@ export function absFromRelOrThrow(raw: string): string {
   return abs(rel);
 }
 
+// Inputs like "" / "." / "/" normalize to the empty rel, which resolves to the
+// data root itself. Destructive ops must refuse it, or a request with path="."
+// would delete/move/trash the entire storage tree.
+function assertNotRoot(rel: string): void {
+  if (safeRelPath(rel) === '') {
+    throw new PathError('traversal', 'refusing to operate on the storage root');
+  }
+}
+
 export function writeUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
@@ -91,6 +100,13 @@ async function doWriteUpload(
       await fh.close();
     }
   } catch (err) {
+    // Close the sink's file descriptor (e.g. on a client-aborted stream) before
+    // removing the partial temp, so neither the fd nor the bytes leak.
+    try {
+      await writer.end();
+    } catch {
+      // already errored — ignore
+    }
     try {
       await rm(tmp, { force: true });
     } catch {
@@ -99,7 +115,12 @@ async function doWriteUpload(
     throw err;
   }
 
-  await rename(tmp, destination);
+  try {
+    await rename(tmp, destination);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 
   // fsync the directory so the rename (the commit point) is itself durable.
   // Best-effort: not supported on every platform; failure here doesn't mean
@@ -138,28 +159,16 @@ export async function openStream(rel: string) {
 }
 
 export function readRange(path: string, start: number, end: number): ReadableStream<Uint8Array> {
-  // Node's createReadStream without encoding yields Buffer, which extends
-  // Uint8Array — safe to enqueue directly.
-  const node = createReadStream(path, { start, end });
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      node.on('data', (chunk: Buffer | string) => {
-        if (typeof chunk === 'string') {
-          controller.enqueue(new TextEncoder().encode(chunk));
-        } else {
-          controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
-        }
-      });
-      node.on('end', () => controller.close());
-      node.on('error', (err) => controller.error(err));
-    },
-    cancel() {
-      node.destroy();
-    },
-  });
+  // `end` is inclusive (HTTP Range semantics); Blob.slice end is exclusive.
+  // Bun's Blob stream applies backpressure, so a slow client can't make the
+  // server buffer the whole range in memory (unlike a raw 'data'-event pump).
+  return Bun.file(path)
+    .slice(start, end + 1)
+    .stream();
 }
 
 export async function removeFile(rel: string): Promise<void> {
+  assertNotRoot(rel);
   const path = absFromRelOrThrow(rel);
   let st: Awaited<ReturnType<typeof stat>>;
   try {
@@ -172,6 +181,7 @@ export async function removeFile(rel: string): Promise<void> {
 }
 
 export async function removeFolder(rel: string): Promise<void> {
+  assertNotRoot(rel);
   const path = absFromRelOrThrow(rel);
   let st: Awaited<ReturnType<typeof stat>>;
   try {
@@ -196,6 +206,7 @@ export async function movePathToTrash(
   if (rel === '.trash' || rel.startsWith('.trash/')) {
     throw new PathError('traversal', 'trash paths cannot be trashed');
   }
+  assertNotRoot(rel);
 
   const from = absFromRelOrThrow(rel);
   let st: Awaited<ReturnType<typeof stat>>;
@@ -250,6 +261,8 @@ export async function removeTrashPath(trashRel: string): Promise<void> {
 }
 
 export async function moveFile(fromRel: string, toRel: string): Promise<void> {
+  assertNotRoot(fromRel);
+  assertNotRoot(toRel);
   const from = absFromRelOrThrow(fromRel);
   const to = absFromRelOrThrow(toRel);
 

@@ -111,7 +111,14 @@ async function walkObjects(bucketDir: string, bucket: string): Promise<ObjectRow
       if (entry.isDirectory()) {
         queue.push({ dir: abs, prefix: rel });
       } else if (entry.isFile()) {
-        const st = await stat(abs);
+        // Skip files removed between readdir and stat — a concurrent delete
+        // must not 500 the whole listing.
+        let st: Awaited<ReturnType<typeof stat>>;
+        try {
+          st = await stat(abs);
+        } catch {
+          continue;
+        }
         out.push({
           key: rel,
           size: st.size,
@@ -620,7 +627,9 @@ function createS3Handler() {
         // DELETE is idempotent.
       }
       // Remove from DB regardless of whether the file existed on disk.
-      db.delete(s3Object).where(eq(s3Object.path, rel));
+      // Must be awaited — drizzle queries are lazy and otherwise never run,
+      // leaving orphaned object metadata behind.
+      await db.delete(s3Object).where(eq(s3Object.path, rel));
       return new Response(null, { status: 204 });
     }
 

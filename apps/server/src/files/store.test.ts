@@ -7,8 +7,15 @@ import { join } from 'node:path';
 const dataDir = await mkdtemp(join(tmpdir(), 'bunnyfile-store-test-'));
 process.env.DATA_DIR = dataDir;
 
-const { PathError, createFolder, listImmediateDirectories, moveFile, openStream, writeUpload } =
-  await import('./store');
+const {
+  PathError,
+  createFolder,
+  listImmediateDirectories,
+  moveFile,
+  openStream,
+  removeFolder,
+  writeUpload,
+} = await import('./store');
 
 function streamFromText(text: string): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -87,6 +94,15 @@ describe('folders', () => {
     await createFolder('empty-dir');
     const dirs = await listImmediateDirectories('');
     expect(dirs).toContain('empty-dir');
+  });
+});
+
+describe('storage-root protection', () => {
+  it('refuses destructive ops that resolve to the data root', async () => {
+    // "" / "." / "/" all normalize to the root — must never delete/move it.
+    await expect(removeFolder('.')).rejects.toMatchObject({ code: 'traversal' });
+    await expect(removeFolder('')).rejects.toMatchObject({ code: 'traversal' });
+    await expect(moveFile('/', 'somewhere')).rejects.toMatchObject({ code: 'traversal' });
   });
 });
 

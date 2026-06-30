@@ -538,8 +538,24 @@ export const filesRoutes = new Elysia({ name: 'files' })
           }
           const startStr = m[1] ?? '';
           const endStr = m[2] ?? '';
-          const start = startStr ? Number.parseInt(startStr, 10) : 0;
-          const end = endStr ? Number.parseInt(endStr, 10) : size - 1;
+          let start: number;
+          let end: number;
+          if (startStr === '' && endStr !== '') {
+            // Suffix range `bytes=-N`: the last N bytes of the file.
+            const n = Number.parseInt(endStr, 10);
+            start = Math.max(0, size - n);
+            end = size - 1;
+          } else {
+            start = startStr ? Number.parseInt(startStr, 10) : 0;
+            end = endStr ? Number.parseInt(endStr, 10) : size - 1;
+          }
+          if (
+            startStr === '' &&
+            endStr === ''
+            // `bytes=-` with no number is malformed.
+          ) {
+            return new Response('invalid range', { status: 416 });
+          }
           if (Number.isNaN(start) || Number.isNaN(end) || start > end || end >= size) {
             return new Response('unsatisfiable range', {
               status: 416,

@@ -166,6 +166,19 @@ describe('files routes', () => {
     expect(res.headers.get('content-security-policy')).toContain('sandbox');
   });
 
+  it('serves a suffix byte range (last N bytes)', async () => {
+    const fd = new FormData();
+    fd.set('path', 'range.txt');
+    fd.set('file', new File(['0123456789'], 'range.txt', { type: 'text/plain' }));
+    await request('/api/files/upload', { method: 'POST', body: fd });
+
+    const res = await request('/api/files/content?path=range.txt', {
+      headers: { Range: 'bytes=-3' },
+    });
+    expect(res.status).toBe(206);
+    expect(await res.text()).toBe('789');
+  });
+
   it('rejects reserved internal prefixes from the files API', async () => {
     // Listing, creating, and deleting under s3/ / .multipart must be refused so
     // the web file API cannot touch the S3 object tree or scratch dirs.
