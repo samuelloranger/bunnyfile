@@ -18,6 +18,7 @@ import { drainUploads } from './inflight';
 import { prometheusMetrics, recordHttpRequest } from './metrics';
 import { accessKeyRoutes } from './s3/access-keys';
 import { s3Routes } from './s3/routes';
+import { allowShareRequest, requestIp } from './shares/rate-limit';
 import { sharesRoutes } from './shares/routes';
 import { usersRoutes } from './users/routes';
 
@@ -57,7 +58,19 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   // better-auth handles every /api/auth/* route. Register per-method so the
   // GET handler doesn't lose to the SPA fallback `.get('/*', ...)` below.
   .get('/api/auth/*', ({ request }) => auth.handler(request))
-  .post('/api/auth/*', ({ request }) => auth.handler(request))
+  .post('/api/auth/*', ({ request, set }) => {
+    // Throttle password-reset requests to stop reset-email spam / enumeration
+    // timing. ponytail: reuse the share token-bucket (≈30/min per IP); add a
+    // dedicated stricter limiter only if abuse shows up.
+    const path = new URL(request.url).pathname;
+    if (path.endsWith('/request-password-reset') || path.endsWith('/forget-password')) {
+      if (!allowShareRequest(requestIp(request), 'password-reset')) {
+        set.status = 429;
+        return { error: 'too many requests' };
+      }
+    }
+    return auth.handler(request);
+  })
   .use(usersRoutes)
   .use(filesRoutes)
   .use(sharesRoutes)
