@@ -36,11 +36,15 @@ export const authOptions = {
     // — better-auth validates the token then redirects to the SPA's
     // /reset-password page with ?token=... (or ?error=INVALID_TOKEN).
     sendResetPassword: async ({ user: u, url }) => {
-      await sendMail({
+      // Fire-and-forget: better-auth awaits this for existing accounts but skips
+      // it for unknown ones. Awaiting SMTP delivery (or letting it throw) would
+      // make existing-account requests measurably slower / error differently —
+      // a timing/error enumeration side-channel. Return immediately, log failures.
+      void sendMail({
         to: u.email,
         subject: 'Reset your BunnyFile password',
         text: `Reset your password (this link expires in 1 hour):\n\n${url}\n\nIf you didn't request this, you can ignore this email.`,
-      });
+      }).catch((err) => console.error('[email] password-reset send failed', err));
     },
   },
   user: {
