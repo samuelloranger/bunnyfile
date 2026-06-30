@@ -14,7 +14,7 @@ export function PdfViewer({ src, name }: { src: string; name: string }) {
       <iframe
         title={name}
         src={src}
-        className="h-[75vh] w-full rounded-lg border border-[hsl(var(--border))]"
+        className="h-[calc(90vh_-_12rem)] w-full rounded-lg border border-[hsl(var(--border))]"
       />
     </div>
   );

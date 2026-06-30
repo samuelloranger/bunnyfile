@@ -117,7 +117,7 @@ export function FilePreviewModal({
             </Button>
           </div>
         </div>
-        <div key={entry?.path} className="overflow-auto">
+        <div key={entry?.path} className="overflow-hidden">
           {entry && viewerFor(entry, src)}
         </div>
       </ModalContent>

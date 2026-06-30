@@ -14,7 +14,7 @@ export function ImageViewer({ src, name }: { src: string; name: string }) {
         {({ zoomIn, zoomOut, resetTransform, state }) => (
           <>
             <TransformComponent
-              wrapperStyle={{ width: '100%', height: '70vh' }}
+              wrapperStyle={{ width: '100%', height: 'calc(90vh - 12rem)' }}
               contentStyle={{
                 width: '100%',
                 height: '100%',
@@ -26,7 +26,7 @@ export function ImageViewer({ src, name }: { src: string; name: string }) {
               <img
                 src={src}
                 alt={name}
-                style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }}
+                style={{ maxWidth: '100%', maxHeight: 'calc(90vh - 12rem)', objectFit: 'contain' }}
               />
             </TransformComponent>
             <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface)/0.9)] px-2 py-1.5 backdrop-blur-sm">

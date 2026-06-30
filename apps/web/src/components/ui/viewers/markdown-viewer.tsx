@@ -44,7 +44,7 @@ export function MarkdownViewer({ src }: { src: string }) {
           </button>
         ))}
       </div>
-      <div className="max-h-[70vh] overflow-auto rounded-lg border border-[hsl(var(--border))] p-4">
+      <div className="max-h-[calc(90vh_-_10rem)] overflow-auto rounded-lg border border-[hsl(var(--border))] p-4">
         {error ? (
           <p className="text-sm text-[hsl(var(--destructive))]">{error}</p>
         ) : content === null ? (

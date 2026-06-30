@@ -75,7 +75,11 @@ export function VideoViewer({ src, name }: { src: string; name: string }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[hsl(var(--border))] bg-black">
       {/* biome-ignore lint/a11y/useMediaCaption: arbitrary uploaded videos do not have caption tracks */}
-      <video ref={videoRef} src={src} className="max-h-[65vh] w-full object-contain" />
+      <video
+        ref={videoRef}
+        src={src}
+        className="max-h-[calc(90vh_-_15rem)] w-full object-contain"
+      />
       {unsupported ? (
         <div className="flex flex-col items-center gap-2 p-4 text-center">
           <p className="text-sm text-[hsl(var(--muted-foreground))]">

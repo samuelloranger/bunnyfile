@@ -123,7 +123,7 @@ export function CodeViewer({
           File truncated at 200 KB
         </p>
       )}
-      <div className="relative max-h-[70vh] overflow-auto rounded-lg border border-[hsl(var(--border))]">
+      <div className="relative max-h-[calc(90vh_-_10rem)] overflow-auto rounded-lg border border-[hsl(var(--border))]">
         <button
           type="button"
           onClick={handleCopy}
