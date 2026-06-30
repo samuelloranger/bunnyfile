@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { trackUpload } from '../inflight';
 import { resolveInRoot, safeRelPath } from './paths';
@@ -32,6 +32,14 @@ export function absFromRelOrThrow(raw: string): string {
   const rel = safeRelPath(raw);
   if (rel == null) throw new PathError('traversal', `invalid path: ${raw}`);
   return abs(rel);
+}
+
+// In-flight uploads are written to `<dest>.tmp-<8 hex>` before the atomic
+// rename. The scanner uses this to skip orphan temp files left by a crashed
+// upload so they never show up as real files. Keep in sync with `doWriteUpload`.
+const UPLOAD_TMP_RE = /\.tmp-[0-9a-f]{8}$/;
+export function isUploadTmpFile(name: string): boolean {
+  return name.endsWith('.tmp') || UPLOAD_TMP_RE.test(name);
 }
 
 export function writeUpload(
@@ -67,6 +75,22 @@ async function doWriteUpload(
       }
     }
     await writer.end();
+
+    // Durability: writer.end() only flushes to the OS page cache. fsync the
+    // file so a crash/power-loss after the rename below can't surface a
+    // zero-length or partial file at the destination (data-loss risk).
+    const fh = await open(tmp, 'r+');
+    try {
+      // Detect a short write (e.g. disk full mid-stream) before we commit:
+      // the bytes on disk must match what we streamed and hashed.
+      const tmpStat = await fh.stat();
+      if (tmpStat.size !== size) {
+        throw new Error(`short write for ${rel}: ${tmpStat.size} on disk, expected ${size}`);
+      }
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
   } catch (err) {
     try {
       await rm(tmp, { force: true });
@@ -77,6 +101,21 @@ async function doWriteUpload(
   }
 
   await rename(tmp, destination);
+
+  // fsync the directory so the rename (the commit point) is itself durable.
+  // Best-effort: not supported on every platform; failure here doesn't mean
+  // the file is bad. Linux/macOS (the deploy targets) support it.
+  try {
+    const dh = await open(dirname(destination), 'r');
+    try {
+      await dh.sync();
+    } finally {
+      await dh.close();
+    }
+  } catch {
+    // directory fsync unsupported — leave as-is
+  }
+
   const st = await stat(destination);
   return {
     size,

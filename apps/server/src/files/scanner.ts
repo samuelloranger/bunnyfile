@@ -6,7 +6,7 @@ import { fileIndex } from '../db/schema';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
 import { deleteFileSearch, upsertFileSearch } from './search';
-import { DATA_ROOT, hashOnDisk } from './store';
+import { DATA_ROOT, hashOnDisk, isUploadTmpFile } from './store';
 
 /**
  * Walk DATA_ROOT, reconcile against file_index.
@@ -31,7 +31,7 @@ async function* walk(abs: string, rel: string): AsyncGenerator<DiskEntry> {
   const entries = await readdir(abs, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue; // skip dotfiles
-    if (entry.name.endsWith('.tmp')) continue; // in-flight uploads
+    if (isUploadTmpFile(entry.name)) continue; // in-flight / orphaned upload temp files
     const nextAbs = `${abs}${sep}${entry.name}`;
     const nextRel = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
