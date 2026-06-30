@@ -39,3 +39,54 @@ pending (file-store-durability, password-reset, users-and-profile, ops).
 ## Pending (retry in progress)
 
 file-store-durability, password-reset, users-and-profile, ops-metrics-shutdown-migrations.
+
+---
+
+# Resolution (2026-06-30)
+
+Branch `harden/review-fixes`. Every finding was re-verified against the code
+before acting; agy's severities were corrected where overstated.
+
+## Fixed (with regression tests where testable)
+
+**Security / data-integrity P1s**
+- Stored XSS on `/api/files/content` + share file endpoint → `CSP: sandbox` + `nosniff`.
+- S3 multipart abort path traversal → UUID-format validation.
+- Open public signup → gated to first-admin; invites bypass via in-process api.
+- Files API reaching `s3/` / `.trash` / `.multipart` → `userRel()` reserved-prefix guard.
+- Empty/`.`/`/` path → operations on the data root → `assertNotRoot()` on all destructive store ops.
+- Thumbnail pdftoppm stderr-pipe deadlock + temp leak → `stderr:'ignore'` + `finally` cleanup.
+- S3 DeleteObject orphaned metadata (unawaited drizzle delete) → awaited.
+- S3 chunked-decode: mid-chunk truncation committed as complete + negative chunk size OOB → both error out.
+
+**P2s**
+- search `deleteFileSearchPrefix` LIKE-wildcard over-match → escaped + `ESCAPE`.
+- static SPA fallback path traversal (defense-in-depth) → WEB_DIST containment check.
+- no sign-in rate limit (brute-force) → `/sign-in/email` throttled, keyed per path.
+- upload fd leak on abort + temp leak on rename failure → sink closed / temp removed.
+- range-read backpressure → `Bun.file().slice().stream()`.
+- suffix byte range `bytes=-N` → returns last N bytes.
+- S3 ListObjects `stat` race → skip files removed mid-walk.
+- scanner indexed the `s3/` object tree → skipped.
+- share filename header injection → control chars stripped.
+- web: nested-path-at-root on create/rename (P1) → relative to current folder.
+- web: grid keynav fired inside modals → dialog guard.
+- web: volume slider didn't unmute → muted synced.
+- web: clipboard copy crashed on plain-HTTP → guarded.
+- Codex follow-up on #15: upload temps dot-prefixed (no collision with real files).
+
+## Downgraded after verification (no fix needed)
+- scanner "deletes uploaded files" → only derived DB rows, self-heals (P3).
+- share token "predictable" (UUIDv7) → ~74 bits random, infeasible to guess (P3).
+- rate-limit "virtual lockout" → bucket accrues correctly; not a bug.
+- search LIKE "SQL injection / data loss" → drizzle binds params; FTS-index desync only.
+
+## Deferred — lower value or needs a deeper change (recommend follow-ups)
+- **Email change** desync: low-confidence (credential provider keys on userId, so login likely works); switching to `auth.api.changeEmail` requires wiring the email-verification flow. Needs investigation, not a blind change.
+- **Last-admin demote/delete race**: existing check is non-atomic; needs a transaction/lock. Low real-world likelihood.
+- **OAuth account-lookup**: genericOAuth isn't configured (N/A unless OAuth is enabled).
+- **S3 GetObject suffix range** / **completeMultipartUpload omitted-parts** / **chunked unbounded per-chunk buffer**: S3 edge cases; capping chunk size risks valid large chunks — needs care.
+- **IP spoofing / shared `unknown` rate-limit bucket**: deploy behind a proxy that sets `X-Forwarded-For`; better fix is reading the socket peer IP.
+- **S3 access-key encryption tied to `BETTER_AUTH_SECRET`**: rotating the secret invalidates stored keys — operational note, document.
+- **Web UX P2/P3**: folder filter only sees the loaded page, batch upload aborts on first failure, un-debounced search, stale search after delete/rename, negative share expiry, thumbnail cache-bust, share error-message loss, invalid-password tab redirect, huge-file viewer OOM, missing fetch aborts on close, iOS fullscreen.
+- **Misc P3**: move TOCTOU, metrics full-table scan, graceful-shutdown completeness, access-key modulo bias.
