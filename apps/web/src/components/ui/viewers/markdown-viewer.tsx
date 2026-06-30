@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
+import remarkGfm from 'remark-gfm';
 import { cn } from '~/lib/cn';
 
 const MAX_BYTES = 200_000;
@@ -51,6 +52,7 @@ export function MarkdownViewer({ src }: { src: string }) {
           <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
         ) : tab === 'rendered' ? (
           <Markdown
+            remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeSanitize]}
             components={{
               h1: ({ children }) => (
@@ -95,13 +97,20 @@ export function MarkdownViewer({ src }: { src: string }) {
               table: ({ children }) => (
                 <table className="mb-4 w-full border-collapse text-sm">{children}</table>
               ),
-              th: ({ children }) => (
-                <th className="border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] px-3 py-2 text-left font-semibold">
+              // `style` carries GFM column alignment (text-align); inline style
+              // overrides the default text-left class when an alignment is set.
+              th: ({ children, style }) => (
+                <th
+                  style={style}
+                  className="border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] px-3 py-2 text-left font-semibold"
+                >
                   {children}
                 </th>
               ),
-              td: ({ children }) => (
-                <td className="border border-[hsl(var(--border))] px-3 py-2">{children}</td>
+              td: ({ children, style }) => (
+                <td style={style} className="border border-[hsl(var(--border))] px-3 py-2">
+                  {children}
+                </td>
               ),
             }}
           >
