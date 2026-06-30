@@ -212,7 +212,7 @@ Each phase produces **working, usable software**. Phase N always leaves BunnyFil
 - [x] Use `XMLHttpRequest` uploads in the SPA to surface progress via `upload.onprogress`
 - [x] Show per-file progress and file position while uploading batches
 - [x] Keep existing authenticated multipart backend endpoint (`POST /api/files/upload`)
-- [ ] Add tests for upload progress UI behavior (mocked XHR progress events)
+- [x] Add tests for upload progress UI behavior (mocked XHR progress events) — `apps/web/src/lib/upload-progress.test.ts`
 - [ ] Optional: evaluate aggregate progress across full file batches
 
 **Done when:** While uploading, users always see useful progress feedback (current file + percent) and errors are shown with actionable messages.
@@ -284,7 +284,7 @@ This is the **killer feature**. Take the time to do it right.
 - [ ] Magic-wormhole-style ephemeral transfers with human-readable codes
 - [ ] OIDC integration (beyond forward-auth)
 - [ ] OPDS feed for ebooks (if anyone asks)
-- [ ] WebSocket live updates (multiple tabs stay in sync)
+- [x] Live updates (multiple tabs stay in sync) — implemented via **SSE** (`EventSource('/api/files/events')` → `text/event-stream` in `apps/server/src/files/routes.ts`), not raw WebSocket. Goal met.
 - [ ] File content search (text extract via a background indexer)
 - [ ] `bun build --compile` single-binary distribution
 - [ ] Homebrew / apt packaging
@@ -337,12 +337,12 @@ If none of the public goals happen, the project still succeeded — I dogfooded 
 
 ## 8. Next actions (today)
 
-- [ ] Create GitHub repo `bunnyfile` (private until Phase 2 complete)
-- [ ] Initialize Bun monorepo per Phase 0 checklist
+- [x] Create GitHub repo `bunnyfile` (now public; releases on GHCR)
+- [x] Initialize Bun monorepo per Phase 0 checklist
 - [ ] Set up project board mirroring these phases
-- [ ] Write a one-paragraph `README.md` with the tagline and non-goals
+- [x] Write a one-paragraph `README.md` with the tagline and non-goals
 - [ ] Register `bunnyfile.tld` or `bunnyfile.app` (check availability)
-- [ ] Sketch the logo (rabbit + folder)
+- [x] Sketch the logo (rabbit + folder) — vector logo shipped (commits e966f8e, 44b19c0)
 
 ---
 
