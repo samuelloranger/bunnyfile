@@ -148,8 +148,8 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
     return { ok: true as const };
   })
 
-  .get('/api/shares/public/:token', async ({ request, params, set }) => {
-    const ip = requestIp(request);
+  .get('/api/shares/public/:token', async ({ request, params, set, server }) => {
+    const ip = requestIp(request, server?.requestIP(request)?.address);
     if (!allowShareRequest(ip, params.token)) {
       set.status = 429;
       return { error: 'Too many requests. Try again shortly.' };
@@ -183,8 +183,8 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
 
   .post(
     '/api/shares/public/:token/file',
-    async ({ request, params, body, set }): Promise<Response | { error: string }> => {
-      const ip = requestIp(request);
+    async ({ request, params, body, set, server }): Promise<Response | { error: string }> => {
+      const ip = requestIp(request, server?.requestIP(request)?.address);
       if (!allowShareRequest(ip, params.token)) {
         set.status = 429;
         return { error: 'Too many requests. Try again shortly.' };

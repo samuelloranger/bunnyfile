@@ -131,6 +131,9 @@ async function listPrefix(prefix: string): Promise<ListEntry[]> {
 
   const diskDirs = await listImmediateDirectories(prefix);
   for (const name of diskDirs) {
+    // Hide internal storage dirs (e.g. the S3 object tree) from the root
+    // listing — following them is already rejected, don't surface them either.
+    if (prefix === '' && RESERVED_TOP_SEGMENTS.has(name)) continue;
     if (!dirCounts.has(name)) {
       dirCounts.set(name, 0);
     }

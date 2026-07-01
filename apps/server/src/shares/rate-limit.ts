@@ -32,8 +32,13 @@ export function allowShareRequest(ip: string, token: string): boolean {
   return true;
 }
 
-export function requestIp(request: Request): string {
+export function requestIp(request: Request, peerAddress?: string | null): string {
   const xff = request.headers.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0]?.trim() ?? 'unknown';
-  return request.headers.get('x-real-ip') ?? 'unknown';
+  if (xff) return xff.split(',')[0]?.trim() || 'unknown';
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp) return realIp;
+  // Fall back to the socket peer address so direct (non-proxied) clients each
+  // get their own bucket — otherwise they'd all share the literal 'unknown'
+  // key and one client could 429 everyone (global lockout).
+  return peerAddress || 'unknown';
 }

@@ -58,7 +58,7 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   // better-auth handles every /api/auth/* route. Register per-method so the
   // GET handler doesn't lose to the SPA fallback `.get('/*', ...)` below.
   .get('/api/auth/*', ({ request }) => auth.handler(request))
-  .post('/api/auth/*', async ({ request, set }) => {
+  .post('/api/auth/*', async ({ request, set, server }) => {
     const path = new URL(request.url).pathname;
     // Block public self-registration once the instance is set up. The first
     // user (admin) is created during /setup; afterwards new accounts come only
@@ -76,7 +76,7 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
     // (≈30/min per IP, keyed per path); tighten if abuse shows up.
     const RATE_LIMITED = ['/sign-in/email', '/request-password-reset', '/forget-password'];
     if (RATE_LIMITED.some((suffix) => path.endsWith(suffix))) {
-      if (!allowShareRequest(requestIp(request), path)) {
+      if (!allowShareRequest(requestIp(request, server?.requestIP(request)?.address), path)) {
         set.status = 429;
         return { error: 'too many requests' };
       }

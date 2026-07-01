@@ -195,6 +195,12 @@ describe('files routes', () => {
       body: JSON.stringify({ path: '.multipart' }),
     });
     expect(deleteRes.status).toBe(400);
+
+    // A reserved dir on disk (e.g. the S3 tree) must not surface in the root listing.
+    await mkdir(join(process.env.DATA_DIR!, 's3'), { recursive: true });
+    const rootRes = await request('/api/files?prefix=');
+    const root = (await rootRes.json()) as { entries: Array<{ path: string }> };
+    expect(root.entries.some((e) => e.path === 's3')).toBe(false);
   });
 });
 
