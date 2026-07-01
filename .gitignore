@@ -33,3 +33,6 @@ data/
 # bun
 bun.lock
 !bun.lock
+
+# stray test artifacts
+apps/server/test.txt
