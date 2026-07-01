@@ -93,6 +93,17 @@ export const Route = createFileRoute('/_app/files')({
   component: FilesPage,
 });
 
+// Debounce a value so rapid changes (e.g. per-keystroke search input) don't
+// fire a request on every change.
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
+
 function FilesPage() {
   const PAGE_SIZE = 200;
   const { path, q, mode, upload: uploadTrigger } = resolveFilesSearch(Route.useSearch());
@@ -119,7 +130,9 @@ function FilesPage() {
   } | null>(null);
   const list = useQuery(filesQuery(path, offset, PAGE_SIZE));
   const globalQuery = shouldUseGlobalSearch(mode, q) ? q.trim() : '';
-  const globalSearch = useQuery(filesSearchQuery(globalQuery));
+  // Debounce the value sent to the server search so typing doesn't storm the API.
+  const debouncedGlobalQuery = useDebounced(globalQuery, 250);
+  const globalSearch = useQuery(filesSearchQuery(debouncedGlobalQuery));
   const folderFilter = mode === 'folder' ? q.trim().toLowerCase() : '';
   const isGlobalSearch = Boolean(globalQuery);
   const allModePrompt = mode === 'all' && !globalQuery;
@@ -203,6 +216,7 @@ function FilesPage() {
     const es = new EventSource('/api/files/events');
     es.addEventListener('files-changed', () => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
     });
     return () => es.close();
   }, [qc]);
@@ -216,6 +230,7 @@ function FilesPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
       pushNotification({ kind: 'success', title: 'Rescan complete' });
     },
     onError: (err: unknown) => {
@@ -229,34 +244,45 @@ function FilesPage() {
 
   const upload = useMutation({
     mutationFn: async (files: File[]) => {
+      // Upload each file independently: one failure must not abort the rest of
+      // the batch. Collect failures and surface them together at the end.
+      const failures: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i]!;
         const target = path ? `${path}/${file.name}` : file.name;
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          const fd = new FormData();
-          fd.append('file', file);
-          fd.append('path', target);
-          xhr.upload.onprogress = (e) => {
-            const next = toUploadProgress(e, i + 1, files.length);
-            if (next) setUploadProgress(next);
-          };
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              reject(new Error(parseUploadErrorMessage(xhr.responseText)));
-            }
-          };
-          xhr.onerror = () => reject(new Error('Network error'));
-          xhr.onabort = () => reject(new Error('Upload aborted'));
-          xhr.open('POST', '/api/files/upload');
-          xhr.send(fd);
-        });
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('path', target);
+            xhr.upload.onprogress = (e) => {
+              const next = toUploadProgress(e, i + 1, files.length);
+              if (next) setUploadProgress(next);
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+              } else {
+                reject(new Error(parseUploadErrorMessage(xhr.responseText)));
+              }
+            };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.onabort = () => reject(new Error('Upload aborted'));
+            xhr.open('POST', '/api/files/upload');
+            xhr.send(fd);
+          });
+        } catch (err) {
+          failures.push(`${file.name}: ${err instanceof Error ? err.message : 'failed'}`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(
+          `${failures.length} of ${files.length} upload(s) failed:\n${failures.join('\n')}`,
+        );
       }
     },
     onSuccess: (_data, files) => {
-      qc.invalidateQueries({ queryKey: ['files'] });
       pushNotification({
         kind: 'success',
         title:
@@ -272,7 +298,12 @@ function FilesPage() {
         body: err instanceof Error ? err.message : undefined,
       });
     },
-    onSettled: () => setUploadProgress(null),
+    // Some files may have uploaded even if others failed — refresh either way.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
+      setUploadProgress(null);
+    },
   });
 
   const rename = useMutation({
@@ -283,6 +314,7 @@ function FilesPage() {
     },
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
       pushNotification({ kind: 'success', title: `Moved to ${vars.newPath}` });
     },
     onError: (err: unknown) => {
@@ -302,6 +334,7 @@ function FilesPage() {
     },
     onSuccess: (_data, folderPath) => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
       pushNotification({ kind: 'success', title: `Folder created: ${folderPath}` });
     },
     onError: (err: unknown) => {
@@ -760,7 +793,7 @@ function FilesPage() {
           )}
       </section>
 
-      {list.data && !isGlobalSearch && !allModePrompt && !folderFilter && (
+      {list.data && !isGlobalSearch && !allModePrompt && (
         <div className="flex items-center justify-end gap-2">
           <Button
             variant="outline"
@@ -1083,6 +1116,7 @@ function DirectoryRow({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
       qc.invalidateQueries({ queryKey: ['trash'] });
       qc.invalidateQueries({ queryKey: ['storage-usage'] });
       pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });
@@ -1191,6 +1225,7 @@ function FileRow({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
       qc.invalidateQueries({ queryKey: ['trash'] });
       qc.invalidateQueries({ queryKey: ['storage-usage'] });
       pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });
@@ -1238,7 +1273,7 @@ function FileRow({
           <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">
             {entry.mime.startsWith('image/') || entry.mime === 'application/pdf' ? (
               <img
-                src={`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}`}
+                src={`/api/files/thumbnail?path=${encodeURIComponent(entry.path)}&v=${entry.mtimeMs}`}
                 alt=""
                 loading="lazy"
                 className="size-full object-cover"
@@ -1560,6 +1595,7 @@ function DirectoryCard({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
       qc.invalidateQueries({ queryKey: ['trash'] });
       qc.invalidateQueries({ queryKey: ['storage-usage'] });
       pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });
@@ -1654,6 +1690,7 @@ function FileCard({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['files'] });
+      qc.invalidateQueries({ queryKey: ['files-search'] });
       qc.invalidateQueries({ queryKey: ['trash'] });
       qc.invalidateQueries({ queryKey: ['storage-usage'] });
       pushNotification({ kind: 'success', title: `Moved ${entry.name} to trash` });

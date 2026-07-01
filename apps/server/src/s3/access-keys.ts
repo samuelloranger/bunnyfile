@@ -8,6 +8,12 @@ import { s3AccessKey } from '../db/schema';
 const SALT = Buffer.from('bunnyfile-s3-access-keys-v1', 'utf8');
 const INFO = Buffer.from('AES-256-GCM-key', 'utf8');
 
+if (!Bun.env.BETTER_AUTH_SECRET) {
+  console.warn(
+    '[s3] BETTER_AUTH_SECRET is not set — S3 access-key secrets are encrypted with an insecure default. Set it before storing real keys, and note that changing it later invalidates all stored keys.',
+  );
+}
+
 function deriveKey(): Buffer {
   const secret = Bun.env.BETTER_AUTH_SECRET ?? 'insecure-dev-secret';
   return Buffer.from(hkdfSync('sha256', secret, SALT, INFO, 32));

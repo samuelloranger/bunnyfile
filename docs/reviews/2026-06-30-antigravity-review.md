@@ -90,3 +90,35 @@ before acting; agy's severities were corrected where overstated.
 - **S3 access-key encryption tied to `BETTER_AUTH_SECRET`**: rotating the secret invalidates stored keys — operational note, document.
 - **Web UX P2/P3**: folder filter only sees the loaded page, batch upload aborts on first failure, un-debounced search, stale search after delete/rename, negative share expiry, thumbnail cache-bust, share error-message loss, invalid-password tab redirect, huge-file viewer OOM, missing fetch aborts on close, iOS fullscreen.
 - **Misc P3**: move TOCTOU, metrics full-table scan, graceful-shutdown completeness, access-key modulo bias.
+
+## Second wave (previously deferred, now fixed)
+- S3 `completeMultipartUpload` assembles only the client-listed parts, in order.
+- chunked decoder caps a single chunk at 64 MiB.
+- last-admin demote/delete re-checks + mutates inside one synchronous SQLite transaction (no race).
+- S3 access-key encryption warns when `BETTER_AUTH_SECRET` is unset.
+- batch upload continues past a per-file failure and reports which failed; index refreshes either way.
+
+## Verified non-issues on second pass (no change)
+- S3 GetObject suffix range: already handled correctly.
+- Email change: credential account keys on `userId`, so the direct update isn't a lockout.
+- Negative/zero share expiry: client already guards `days > 0` / `maxDownloads > 0`.
+- OAuth account lookup: genericOAuth isn't configured.
+
+## Still open (minor UX polish / edge — low priority)
+un-debounced folder search, stale search results after delete/rename, thumbnail cache-bust on
+regenerate, folder filter only sees the loaded page, share error-message loss / invalid-password tab
+redirect, huge-file viewer memory cap, missing fetch aborts on modal close, iOS video fullscreen,
+metrics full-table scan, graceful-shutdown completeness, move TOCTOU.
+
+## Third wave (UX/edge, now fixed)
+- Folder filter no longer hides pagination — you can page through while filtering.
+- File mutations now invalidate the search cache (no stale search after delete/rename/move).
+- Global search is debounced (250ms) so typing doesn't storm the API.
+- Code/markdown viewers fetch a bounded Range (can't OOM the tab on a huge file) and abort the request on close.
+- Thumbnails cache-bust on content change (`&v=mtime`).
+- Public share download goes through fetch: a wrong password shows an in-page error instead of navigating the tab to raw JSON; the file downloads via a blob.
+- Video fullscreen falls back to `webkitEnterFullscreen` on iOS.
+
+## Left as-is (genuinely minor / needs measurement — not worth the churn)
+- Metrics storage query scans file_index on scrape (fine at homelab scale; cache if it ever matters).
+- Graceful-shutdown edge completeness; move() stat→rename TOCTOU (tiny window, filesystem-first self-heals).

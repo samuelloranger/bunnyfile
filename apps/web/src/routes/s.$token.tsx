@@ -31,16 +31,47 @@ function PublicSharePage() {
   const status =
     share.data && 'status' in share.data && share.data.status !== 'ok' ? share.data.status : null;
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    if (
-      share.data &&
-      'status' in share.data &&
-      share.data.status === 'ok' &&
-      share.data.requiresPassword &&
-      !password.trim()
-    ) {
-      e.preventDefault();
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    // Always handle in-page: a native form POST would navigate the tab to the
+    // raw JSON error on a wrong password instead of showing a message.
+    e.preventDefault();
+    setPasswordError(null);
+    const needsPw =
+      share.data && 'status' in share.data && share.data.status === 'ok'
+        ? share.data.requiresPassword
+        : false;
+    if (needsPw && !password.trim()) {
       setPasswordError('Enter the password before downloading.');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/shares/public/${encodeURIComponent(token)}/file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(password.trim() ? { password: password.trim() } : {}),
+      });
+      if (!res.ok) {
+        let msg = 'Download failed.';
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body?.error) msg = body.error;
+        } catch {
+          // non-JSON error body — keep the generic message
+        }
+        setPasswordError(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = okShare?.name ?? 'download';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setPasswordError('Download failed. Please try again.');
     }
   }
 
