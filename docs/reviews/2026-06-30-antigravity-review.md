@@ -90,3 +90,22 @@ before acting; agy's severities were corrected where overstated.
 - **S3 access-key encryption tied to `BETTER_AUTH_SECRET`**: rotating the secret invalidates stored keys — operational note, document.
 - **Web UX P2/P3**: folder filter only sees the loaded page, batch upload aborts on first failure, un-debounced search, stale search after delete/rename, negative share expiry, thumbnail cache-bust, share error-message loss, invalid-password tab redirect, huge-file viewer OOM, missing fetch aborts on close, iOS fullscreen.
 - **Misc P3**: move TOCTOU, metrics full-table scan, graceful-shutdown completeness, access-key modulo bias.
+
+## Second wave (previously deferred, now fixed)
+- S3 `completeMultipartUpload` assembles only the client-listed parts, in order.
+- chunked decoder caps a single chunk at 64 MiB.
+- last-admin demote/delete re-checks + mutates inside one synchronous SQLite transaction (no race).
+- S3 access-key encryption warns when `BETTER_AUTH_SECRET` is unset.
+- batch upload continues past a per-file failure and reports which failed; index refreshes either way.
+
+## Verified non-issues on second pass (no change)
+- S3 GetObject suffix range: already handled correctly.
+- Email change: credential account keys on `userId`, so the direct update isn't a lockout.
+- Negative/zero share expiry: client already guards `days > 0` / `maxDownloads > 0`.
+- OAuth account lookup: genericOAuth isn't configured.
+
+## Still open (minor UX polish / edge — low priority)
+un-debounced folder search, stale search results after delete/rename, thumbnail cache-bust on
+regenerate, folder filter only sees the loaded page, share error-message loss / invalid-password tab
+redirect, huge-file viewer memory cap, missing fetch aborts on modal close, iOS video fullscreen,
+metrics full-table scan, graceful-shutdown completeness, move TOCTOU.

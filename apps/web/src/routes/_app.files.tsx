@@ -229,34 +229,45 @@ function FilesPage() {
 
   const upload = useMutation({
     mutationFn: async (files: File[]) => {
+      // Upload each file independently: one failure must not abort the rest of
+      // the batch. Collect failures and surface them together at the end.
+      const failures: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i]!;
         const target = path ? `${path}/${file.name}` : file.name;
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          const fd = new FormData();
-          fd.append('file', file);
-          fd.append('path', target);
-          xhr.upload.onprogress = (e) => {
-            const next = toUploadProgress(e, i + 1, files.length);
-            if (next) setUploadProgress(next);
-          };
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              reject(new Error(parseUploadErrorMessage(xhr.responseText)));
-            }
-          };
-          xhr.onerror = () => reject(new Error('Network error'));
-          xhr.onabort = () => reject(new Error('Upload aborted'));
-          xhr.open('POST', '/api/files/upload');
-          xhr.send(fd);
-        });
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('path', target);
+            xhr.upload.onprogress = (e) => {
+              const next = toUploadProgress(e, i + 1, files.length);
+              if (next) setUploadProgress(next);
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+              } else {
+                reject(new Error(parseUploadErrorMessage(xhr.responseText)));
+              }
+            };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.onabort = () => reject(new Error('Upload aborted'));
+            xhr.open('POST', '/api/files/upload');
+            xhr.send(fd);
+          });
+        } catch (err) {
+          failures.push(`${file.name}: ${err instanceof Error ? err.message : 'failed'}`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(
+          `${failures.length} of ${files.length} upload(s) failed:\n${failures.join('\n')}`,
+        );
       }
     },
     onSuccess: (_data, files) => {
-      qc.invalidateQueries({ queryKey: ['files'] });
       pushNotification({
         kind: 'success',
         title:
@@ -272,7 +283,11 @@ function FilesPage() {
         body: err instanceof Error ? err.message : undefined,
       });
     },
-    onSettled: () => setUploadProgress(null),
+    // Some files may have uploaded even if others failed — refresh either way.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['files'] });
+      setUploadProgress(null);
+    },
   });
 
   const rename = useMutation({
