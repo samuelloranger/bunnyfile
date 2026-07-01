@@ -85,13 +85,21 @@ export function CodeViewer({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     async function load() {
       try {
-        const res = await fetch(src);
+        // Request at most MAX_BYTES so a huge file can't OOM the tab. The
+        // endpoint honors Range; a 206 reports the full size via Content-Range.
+        const res = await fetch(src, {
+          headers: { Range: `bytes=0-${MAX_BYTES - 1}` },
+          signal: controller.signal,
+        });
         const text = await res.text();
+        const contentRange = res.headers.get('content-range');
+        const total = contentRange ? Number(contentRange.split('/')[1]) : text.length;
         const sliced = text.slice(0, MAX_BYTES);
         rawRef.current = sliced;
-        if (!cancelled) setTruncated(text.length > MAX_BYTES);
+        if (!cancelled) setTruncated(total > MAX_BYTES || text.length > MAX_BYTES);
         const hl = await getHighlighter();
         const lang = langFromName(name);
         const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -100,13 +108,15 @@ export function CodeViewer({
           theme: isDark ? 'github-dark' : 'github-light',
         });
         if (!cancelled) setHtml(highlighted);
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         if (!cancelled) setError('Failed to load file');
       }
     }
     void load();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [src, name]);
 

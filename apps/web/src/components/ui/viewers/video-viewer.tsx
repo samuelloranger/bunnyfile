@@ -72,7 +72,15 @@ export function VideoViewer({ src, name }: { src: string; name: string }) {
   }
 
   function requestFullscreen() {
-    void videoRef.current?.requestFullscreen();
+    const v = videoRef.current;
+    if (!v) return;
+    // iOS Safari (iPhone) doesn't support the standard Fullscreen API on
+    // elements — it exposes webkitEnterFullscreen on the video element itself.
+    if (v.requestFullscreen) {
+      void v.requestFullscreen();
+    } else {
+      (v as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen?.();
+    }
   }
 
   return (

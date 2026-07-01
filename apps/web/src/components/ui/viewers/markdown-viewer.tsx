@@ -13,16 +13,20 @@ export function MarkdownViewer({ src }: { src: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(src)
+    const controller = new AbortController();
+    // Bounded Range fetch so a huge file can't OOM the tab; abort on unmount.
+    fetch(src, { headers: { Range: `bytes=0-${MAX_BYTES - 1}` }, signal: controller.signal })
       .then((r) => r.text())
       .then((text) => {
         if (!cancelled) setContent(text.slice(0, MAX_BYTES));
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         if (!cancelled) setError('Failed to load file');
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [src]);
 

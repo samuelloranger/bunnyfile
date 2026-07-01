@@ -109,3 +109,16 @@ un-debounced folder search, stale search results after delete/rename, thumbnail 
 regenerate, folder filter only sees the loaded page, share error-message loss / invalid-password tab
 redirect, huge-file viewer memory cap, missing fetch aborts on modal close, iOS video fullscreen,
 metrics full-table scan, graceful-shutdown completeness, move TOCTOU.
+
+## Third wave (UX/edge, now fixed)
+- Folder filter no longer hides pagination — you can page through while filtering.
+- File mutations now invalidate the search cache (no stale search after delete/rename/move).
+- Global search is debounced (250ms) so typing doesn't storm the API.
+- Code/markdown viewers fetch a bounded Range (can't OOM the tab on a huge file) and abort the request on close.
+- Thumbnails cache-bust on content change (`&v=mtime`).
+- Public share download goes through fetch: a wrong password shows an in-page error instead of navigating the tab to raw JSON; the file downloads via a blob.
+- Video fullscreen falls back to `webkitEnterFullscreen` on iOS.
+
+## Left as-is (genuinely minor / needs measurement — not worth the churn)
+- Metrics storage query scans file_index on scrape (fine at homelab scale; cache if it ever matters).
+- Graceful-shutdown edge completeness; move() stat→rename TOCTOU (tiny window, filesystem-first self-heals).
