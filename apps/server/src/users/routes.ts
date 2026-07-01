@@ -16,11 +16,6 @@ const publicUserShape = {
   createdAt: user.createdAt,
 };
 
-async function adminCount(): Promise<number> {
-  const [row] = await db.select({ c: count() }).from(user).where(eq(user.role, 'admin'));
-  return row?.c ?? 0;
-}
-
 async function callerFromRequest(request: Request) {
   return auth.api.getSession({ headers: request.headers });
 }
@@ -107,19 +102,28 @@ export const usersRoutes = new Elysia({ name: 'users' })
         set.status = 404;
         return { error: 'user not found' as const };
       }
-      if (body.role && target.role === 'admin' && body.role !== 'admin') {
-        if ((await adminCount()) <= 1) {
-          set.status = 400;
-          return { error: 'cannot demote the last admin' as const };
-        }
-      }
       const patch: { role?: Role; name?: string } = {};
       if (body.role) patch.role = body.role;
       if (body.name !== undefined) patch.name = body.name;
       if (Object.keys(patch).length === 0) {
         return { ok: true as const };
       }
-      await db.update(user).set(patch).where(eq(user.id, params.id));
+      const demoting = Boolean(body.role && target.role === 'admin' && body.role !== 'admin');
+      // Re-check the admin count and apply the patch in one synchronous
+      // transaction so two concurrent demotions can't both pass the check and
+      // leave zero admins.
+      const applied = db.transaction((tx) => {
+        if (demoting) {
+          const [row] = tx.select({ c: count() }).from(user).where(eq(user.role, 'admin')).all();
+          if ((row?.c ?? 0) <= 1) return false;
+        }
+        tx.update(user).set(patch).where(eq(user.id, params.id)).run();
+        return true;
+      });
+      if (!applied) {
+        set.status = 400;
+        return { error: 'cannot demote the last admin' as const };
+      }
       return { ok: true as const };
     },
     {
@@ -154,11 +158,20 @@ export const usersRoutes = new Elysia({ name: 'users' })
         set.status = 404;
         return { error: 'user not found' as const };
       }
-      if (target.role === 'admin' && (await adminCount()) <= 1) {
+      // Re-check admin count and delete atomically so concurrent deletes can't
+      // both pass the check and remove the last admin.
+      const deleted = db.transaction((tx) => {
+        if (target.role === 'admin') {
+          const [row] = tx.select({ c: count() }).from(user).where(eq(user.role, 'admin')).all();
+          if ((row?.c ?? 0) <= 1) return false;
+        }
+        tx.delete(user).where(eq(user.id, params.id)).run();
+        return true;
+      });
+      if (!deleted) {
         set.status = 400;
         return { error: 'cannot delete the last admin' as const };
       }
-      await db.delete(user).where(eq(user.id, params.id));
       return { ok: true as const };
     },
     {
