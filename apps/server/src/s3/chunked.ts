@@ -65,6 +65,13 @@ export function decodeChunkedStream(
             controller.error(new Error('invalid chunk size in chunked encoding'));
             return;
           }
+          // Cap a single chunk so a malicious huge declared size can't force the
+          // decoder to buffer unbounded memory. Real chunks (aws-chunked, Caddy)
+          // are KBs; 64 MiB is far above any legitimate value.
+          if (chunkSize > 64 * 1024 * 1024) {
+            controller.error(new Error('chunk size exceeds limit'));
+            return;
+          }
           if (chunkSize === 0) {
             // Final zero-length chunk — end of body.
             controller.close();

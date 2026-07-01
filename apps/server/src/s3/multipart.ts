@@ -194,13 +194,21 @@ async function completeMultipartUpload(
     }
   }
 
+  // Assemble ONLY the parts the client listed in CompleteMultipartUpload, in
+  // ascending part-number order (S3 semantics) — not every part ever uploaded.
+  // A client may intentionally omit parts; including them would corrupt the
+  // object. clientParts were already validated to exist with matching ETags.
+  const partsToAssemble = [...clientParts]
+    .sort((a, b) => a.partNumber - b.partNumber)
+    .map((cp) => dbParts.find((p) => p.partNumber === cp.partNumber)!);
+
   const destRel = `s3/${bucket}/${key}`;
   const destAbs = absFromRelOrThrow(destRel);
   await mkdir(dirname(destAbs), { recursive: true });
   const tmp = `${destAbs}.tmp-${crypto.randomUUID().slice(0, 8)}`;
   const writer = Bun.file(tmp).writer();
   let totalSize = 0;
-  for (const part of dbParts) {
+  for (const part of partsToAssemble) {
     const data = await Bun.file(part.path).arrayBuffer();
     writer.write(new Uint8Array(data));
     totalSize += data.byteLength;
@@ -209,7 +217,7 @@ async function completeMultipartUpload(
   await rename(tmp, destAbs);
 
   const destStat = await stat(destAbs);
-  const etagWithQuotes = multipartEtag(dbParts);
+  const etagWithQuotes = multipartEtag(partsToAssemble);
   const etagValue = etagWithQuotes.replace(/^"|"$/g, '');
 
   await db
