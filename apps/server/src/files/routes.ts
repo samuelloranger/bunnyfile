@@ -25,6 +25,29 @@ import {
 } from './store';
 import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
 
+// Stored-XSS neutralizer for user-controlled bytes: `sandbox` stops any script
+// execution if the file is navigated to or iframed (e.g. an uploaded .html),
+// and `nosniff` makes the browser trust the declared type instead of guessing.
+// Images/video/pdf preview still work — CSP only governs documents.
+export const SAFE_CONTENT_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': 'sandbox',
+} as const;
+
+// Internal storage areas the user-facing files API must never touch: the S3
+// object tree, trash, and multipart scratch. (The S3 API addresses `s3/...`
+// through its own resolver; the web file API must not.)
+const RESERVED_TOP_SEGMENTS = new Set(['s3', '.trash', '.multipart']);
+
+/** Validate a user-supplied path AND reject reserved internal prefixes. */
+function userRel(raw: string | null | undefined): string | null {
+  const rel = safeRelPath(raw);
+  if (rel == null) return null;
+  const top = rel.split('/')[0];
+  if (top && RESERVED_TOP_SEGMENTS.has(top)) return null;
+  return rel;
+}
+
 type FileEntry = {
   kind: 'file';
   name: string;
@@ -108,6 +131,9 @@ async function listPrefix(prefix: string): Promise<ListEntry[]> {
 
   const diskDirs = await listImmediateDirectories(prefix);
   for (const name of diskDirs) {
+    // Hide internal storage dirs (e.g. the S3 object tree) from the root
+    // listing — following them is already rejected, don't surface them either.
+    if (prefix === '' && RESERVED_TOP_SEGMENTS.has(name)) continue;
     if (!dirCounts.has(name)) {
       dirCounts.set(name, 0);
     }
@@ -147,7 +173,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return { error: 'unauthorized' as const };
       }
-      const prefix = safeRelPath(query.prefix ?? '');
+      const prefix = userRel(query.prefix ?? '');
       if (prefix == null) {
         set.status = 400;
         return { error: 'invalid prefix' as const };
@@ -280,7 +306,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return { error: 'unauthorized' as const };
       }
-      const path = safeRelPath(body.path);
+      const path = userRel(body.path);
       if (!path) {
         set.status = 400;
         return { error: 'invalid path' as const };
@@ -313,7 +339,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return { error: 'unauthorized' as const };
       }
-      const path = safeRelPath(body.path);
+      const path = userRel(body.path);
       if (!path) {
         set.status = 400;
         return { error: 'invalid path' as const };
@@ -413,7 +439,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
       }
 
       const file = body.file;
-      const target = safeRelPath(body.path);
+      const target = userRel(body.path);
       if (!target) {
         set.status = 400;
         return { error: 'invalid path' as const };
@@ -492,7 +518,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return { error: 'unauthorized' };
       }
-      const path = safeRelPath(query.path);
+      const path = userRel(query.path);
       if (!path) {
         set.status = 404;
         return { error: 'not found' };
@@ -515,8 +541,24 @@ export const filesRoutes = new Elysia({ name: 'files' })
           }
           const startStr = m[1] ?? '';
           const endStr = m[2] ?? '';
-          const start = startStr ? Number.parseInt(startStr, 10) : 0;
-          const end = endStr ? Number.parseInt(endStr, 10) : size - 1;
+          let start: number;
+          let end: number;
+          if (startStr === '' && endStr !== '') {
+            // Suffix range `bytes=-N`: the last N bytes of the file.
+            const n = Number.parseInt(endStr, 10);
+            start = Math.max(0, size - n);
+            end = size - 1;
+          } else {
+            start = startStr ? Number.parseInt(startStr, 10) : 0;
+            end = endStr ? Number.parseInt(endStr, 10) : size - 1;
+          }
+          if (
+            startStr === '' &&
+            endStr === ''
+            // `bytes=-` with no number is malformed.
+          ) {
+            return new Response('invalid range', { status: 416 });
+          }
           if (Number.isNaN(start) || Number.isNaN(end) || start > end || end >= size) {
             return new Response('unsatisfiable range', {
               status: 416,
@@ -526,6 +568,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
           return new Response(readRange(abs, start, end), {
             status: 206,
             headers: {
+              ...SAFE_CONTENT_HEADERS,
               'Accept-Ranges': 'bytes',
               'Content-Range': `bytes ${start}-${end}/${size}`,
               'Content-Length': String(end - start + 1),
@@ -536,6 +579,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
         return new Response(Bun.file(abs).stream(), {
           headers: {
+            ...SAFE_CONTENT_HEADERS,
             'Accept-Ranges': 'bytes',
             'Content-Length': String(size),
             'Content-Type': mime,
@@ -566,7 +610,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return new Response('unauthorized', { status: 401 });
       }
-      const rel = safeRelPath(query.path);
+      const rel = userRel(query.path);
       if (!rel) {
         set.status = 400;
         return new Response('invalid path', { status: 400 });
@@ -706,7 +750,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return { error: 'unauthorized' as const };
       }
-      const rel = safeRelPath(query.path);
+      const rel = userRel(query.path);
       if (!rel) {
         set.status = 400;
         return { error: 'invalid path' as const };
@@ -738,8 +782,8 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return { error: 'unauthorized' as const };
       }
-      const path = safeRelPath(body.path);
-      const newPath = safeRelPath(body.newPath);
+      const path = userRel(body.path);
+      const newPath = userRel(body.newPath);
       if (!path || !newPath) {
         set.status = 400;
         return { error: 'invalid path' as const };
@@ -804,7 +848,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
         set.status = 401;
         return { error: 'unauthorized' as const };
       }
-      const path = safeRelPath(body.path);
+      const path = userRel(body.path);
       if (!path) {
         set.status = 400;
         return { error: 'invalid path' as const };

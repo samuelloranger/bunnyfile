@@ -10,10 +10,10 @@ process.env.DATA_DIR = dataDir;
 const {
   PathError,
   createFolder,
-  isUploadTmpFile,
   listImmediateDirectories,
   moveFile,
   openStream,
+  removeFolder,
   writeUpload,
 } = await import('./store');
 
@@ -65,15 +65,6 @@ describe('writeUpload integrity', () => {
   });
 });
 
-describe('isUploadTmpFile', () => {
-  it('matches the writer tmp naming, not real files', () => {
-    expect(isUploadTmpFile('photo.jpg.tmp-1a2b3c4d')).toBe(true);
-    expect(isUploadTmpFile('legacy.tmp')).toBe(true);
-    expect(isUploadTmpFile('photo.jpg')).toBe(false);
-    expect(isUploadTmpFile('notes.tmp-draft')).toBe(false); // suffix not 8 hex
-  });
-});
-
 describe('moveFile', () => {
   it('moves file and keeps bytes intact', async () => {
     const id = crypto.randomUUID().slice(0, 8);
@@ -103,6 +94,15 @@ describe('folders', () => {
     await createFolder('empty-dir');
     const dirs = await listImmediateDirectories('');
     expect(dirs).toContain('empty-dir');
+  });
+});
+
+describe('storage-root protection', () => {
+  it('refuses destructive ops that resolve to the data root', async () => {
+    // "" / "." / "/" all normalize to the root — must never delete/move it.
+    await expect(removeFolder('.')).rejects.toMatchObject({ code: 'traversal' });
+    await expect(removeFolder('')).rejects.toMatchObject({ code: 'traversal' });
+    await expect(moveFile('/', 'somewhere')).rejects.toMatchObject({ code: 'traversal' });
   });
 });
 

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { trackUpload } from '../inflight';
 import { resolveInRoot, safeRelPath } from './paths';
 
@@ -34,12 +34,13 @@ export function absFromRelOrThrow(raw: string): string {
   return abs(rel);
 }
 
-// In-flight uploads are written to `<dest>.tmp-<8 hex>` before the atomic
-// rename. The scanner uses this to skip orphan temp files left by a crashed
-// upload so they never show up as real files. Keep in sync with `doWriteUpload`.
-const UPLOAD_TMP_RE = /\.tmp-[0-9a-f]{8}$/;
-export function isUploadTmpFile(name: string): boolean {
-  return name.endsWith('.tmp') || UPLOAD_TMP_RE.test(name);
+// Inputs like "" / "." / "/" normalize to the empty rel, which resolves to the
+// data root itself. Destructive ops must refuse it, or a request with path="."
+// would delete/move/trash the entire storage tree.
+function assertNotRoot(rel: string): void {
+  if (safeRelPath(rel) === '') {
+    throw new PathError('traversal', 'refusing to operate on the storage root');
+  }
 }
 
 export function writeUpload(
@@ -56,7 +57,14 @@ async function doWriteUpload(
   const destination = absFromRelOrThrow(rel);
   await mkdir(dirname(destination), { recursive: true });
 
-  const tmp = `${destination}.tmp-${crypto.randomUUID().slice(0, 8)}`;
+  // Dot-prefixed temp in the same directory: the scanner already skips all
+  // dotfiles, so an in-flight/orphaned temp is never indexed — and the marker
+  // can't collide with a *visible* user path (a user file like
+  // `report.tmp-1a2b3c4d` stays listed). Same dir keeps the rename atomic.
+  const tmp = join(
+    dirname(destination),
+    `.${basename(destination)}.tmp-${crypto.randomUUID().slice(0, 8)}`,
+  );
   const sha256Hash = createHash('sha256');
   const md5Hash = createHash('md5');
   let size = 0;
@@ -92,6 +100,13 @@ async function doWriteUpload(
       await fh.close();
     }
   } catch (err) {
+    // Close the sink's file descriptor (e.g. on a client-aborted stream) before
+    // removing the partial temp, so neither the fd nor the bytes leak.
+    try {
+      await writer.end();
+    } catch {
+      // already errored — ignore
+    }
     try {
       await rm(tmp, { force: true });
     } catch {
@@ -100,7 +115,12 @@ async function doWriteUpload(
     throw err;
   }
 
-  await rename(tmp, destination);
+  try {
+    await rename(tmp, destination);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 
   // fsync the directory so the rename (the commit point) is itself durable.
   // Best-effort: not supported on every platform; failure here doesn't mean
@@ -139,28 +159,16 @@ export async function openStream(rel: string) {
 }
 
 export function readRange(path: string, start: number, end: number): ReadableStream<Uint8Array> {
-  // Node's createReadStream without encoding yields Buffer, which extends
-  // Uint8Array — safe to enqueue directly.
-  const node = createReadStream(path, { start, end });
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      node.on('data', (chunk: Buffer | string) => {
-        if (typeof chunk === 'string') {
-          controller.enqueue(new TextEncoder().encode(chunk));
-        } else {
-          controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
-        }
-      });
-      node.on('end', () => controller.close());
-      node.on('error', (err) => controller.error(err));
-    },
-    cancel() {
-      node.destroy();
-    },
-  });
+  // `end` is inclusive (HTTP Range semantics); Blob.slice end is exclusive.
+  // Bun's Blob stream applies backpressure, so a slow client can't make the
+  // server buffer the whole range in memory (unlike a raw 'data'-event pump).
+  return Bun.file(path)
+    .slice(start, end + 1)
+    .stream();
 }
 
 export async function removeFile(rel: string): Promise<void> {
+  assertNotRoot(rel);
   const path = absFromRelOrThrow(rel);
   let st: Awaited<ReturnType<typeof stat>>;
   try {
@@ -173,6 +181,7 @@ export async function removeFile(rel: string): Promise<void> {
 }
 
 export async function removeFolder(rel: string): Promise<void> {
+  assertNotRoot(rel);
   const path = absFromRelOrThrow(rel);
   let st: Awaited<ReturnType<typeof stat>>;
   try {
@@ -197,6 +206,7 @@ export async function movePathToTrash(
   if (rel === '.trash' || rel.startsWith('.trash/')) {
     throw new PathError('traversal', 'trash paths cannot be trashed');
   }
+  assertNotRoot(rel);
 
   const from = absFromRelOrThrow(rel);
   let st: Awaited<ReturnType<typeof stat>>;
@@ -251,6 +261,8 @@ export async function removeTrashPath(trashRel: string): Promise<void> {
 }
 
 export async function moveFile(fromRel: string, toRel: string): Promise<void> {
+  assertNotRoot(fromRel);
+  assertNotRoot(toRel);
   const from = absFromRelOrThrow(fromRel);
   const to = absFromRelOrThrow(toRel);
 

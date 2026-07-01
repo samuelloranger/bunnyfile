@@ -384,6 +384,11 @@ function FilesPage() {
       if (tag === 'input' || tag === 'textarea' || target.isContentEditable) {
         return;
       }
+      // Don't drive grid navigation from inside an open modal/dialog (e.g.
+      // Enter on a dialog button shouldn't also open a preview behind it).
+      if (target.closest('[role="dialog"]')) {
+        return;
+      }
       if (e.key === '/') {
         e.preventDefault();
         searchRef.current?.focus();
@@ -420,9 +425,11 @@ function FilesPage() {
     };
   }, [entries, navigate, selectedIndex, q, mode]);
 
+  // Names are always interpreted relative to the current folder, even when they
+  // contain a `/` (e.g. renaming to `archive/old.txt` inside `docs/work` →
+  // `docs/work/archive/old.txt`), so input never silently jumps to the root.
   function toTargetPath(currentPath: string, rawInput: string): string {
     const trimmed = rawInput.trim().replace(/^\/+/, '');
-    if (trimmed.includes('/')) return trimmed;
     const idx = currentPath.lastIndexOf('/');
     const parent = idx === -1 ? '' : currentPath.slice(0, idx);
     return parent ? `${parent}/${trimmed}` : trimmed;
@@ -430,7 +437,6 @@ function FilesPage() {
 
   function toCreateFolderPath(currentPath: string, rawInput: string): string {
     const trimmed = rawInput.trim().replace(/^\/+/, '');
-    if (trimmed.includes('/')) return trimmed;
     return currentPath ? `${currentPath}/${trimmed}` : trimmed;
   }
 

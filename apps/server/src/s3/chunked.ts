@@ -59,7 +59,14 @@ export function decodeChunkedStream(
           const sizeLine = dec.decode(buf.slice(0, crlfPos));
           const chunkSize = Number.parseInt((sizeLine.split(';')[0] ?? '').trim(), 16);
 
-          if (Number.isNaN(chunkSize) || chunkSize === 0) {
+          // A negative size (e.g. "-a") parses without NaN and would make the
+          // slice bounds below go out of range, desyncing the parser. Reject it.
+          if (Number.isNaN(chunkSize) || chunkSize < 0) {
+            controller.error(new Error('invalid chunk size in chunked encoding'));
+            return;
+          }
+          if (chunkSize === 0) {
+            // Final zero-length chunk — end of body.
             controller.close();
             return;
           }
@@ -69,9 +76,10 @@ export function decodeChunkedStream(
           const needed = dataEnd + 2; // trailing \r\n
 
           if (!(await fillUntil(needed))) {
-            // stream ended mid-chunk — emit whatever we have
-            if (buf.length > dataStart) controller.enqueue(buf.slice(dataStart));
-            controller.close();
+            // Stream ended mid-chunk: the upload is truncated. Erroring (rather
+            // than enqueuing the partial data and closing) ensures the writer
+            // aborts and the partial file is never committed as complete.
+            controller.error(new Error('chunked stream ended mid-chunk'));
             return;
           }
 

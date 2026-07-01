@@ -22,16 +22,22 @@ export function isThumbnailable(mime: string): boolean {
 
 async function pdfToBuffer(absPath: string): Promise<Buffer> {
   const tmp = join(tmpdir(), `bunnyfile-thumb-${crypto.randomUUID().slice(0, 8)}`);
-  const proc = Bun.spawn(
-    ['pdftoppm', '-png', '-r', '72', '-f', '1', '-l', '1', '-singlefile', absPath, tmp],
-    { stderr: 'pipe' },
-  );
-  const exit = await proc.exited;
-  if (exit !== 0) throw new Error(`pdftoppm exited with code ${exit}`);
   const pngPath = `${tmp}.png`;
-  const data = await Bun.file(pngPath).arrayBuffer();
-  await rm(pngPath, { force: true });
-  return Buffer.from(data);
+  try {
+    // stderr: 'ignore' — we only need the exit code. Piping it without draining
+    // can fill the OS pipe buffer and deadlock pdftoppm (await never resolves).
+    const proc = Bun.spawn(
+      ['pdftoppm', '-png', '-r', '72', '-f', '1', '-l', '1', '-singlefile', absPath, tmp],
+      { stderr: 'ignore', stdout: 'ignore' },
+    );
+    const exit = await proc.exited;
+    if (exit !== 0) throw new Error(`pdftoppm exited with code ${exit}`);
+    const data = await Bun.file(pngPath).arrayBuffer();
+    return Buffer.from(data);
+  } finally {
+    // Always clean up the intermediate PNG, including on failure.
+    await rm(pngPath, { force: true }).catch(() => {});
+  }
 }
 
 export async function generateAndStoreThumbnail(

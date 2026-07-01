@@ -5,6 +5,7 @@ import { db } from '../db';
 import { fileIndex, type ShareLinkRow, shareLink } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf, safeRelPath } from '../files/paths';
+import { SAFE_CONTENT_HEADERS } from '../files/routes';
 import { openStream, PathError } from '../files/store';
 import { allowShareRequest, requestIp } from './rate-limit';
 
@@ -147,8 +148,8 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
     return { ok: true as const };
   })
 
-  .get('/api/shares/public/:token', async ({ request, params, set }) => {
-    const ip = requestIp(request);
+  .get('/api/shares/public/:token', async ({ request, params, set, server }) => {
+    const ip = requestIp(request, server?.requestIP(request)?.address);
     if (!allowShareRequest(ip, params.token)) {
       set.status = 429;
       return { error: 'Too many requests. Try again shortly.' };
@@ -182,8 +183,8 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
 
   .post(
     '/api/shares/public/:token/file',
-    async ({ request, params, body, set }): Promise<Response | { error: string }> => {
-      const ip = requestIp(request);
+    async ({ request, params, body, set, server }): Promise<Response | { error: string }> => {
+      const ip = requestIp(request, server?.requestIP(request)?.address);
       if (!allowShareRequest(ip, params.token)) {
         set.status = 429;
         return { error: 'Too many requests. Try again shortly.' };
@@ -234,11 +235,17 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
         }
 
         const name = basenameOf(row.path);
+        // Strip control chars (incl. CR/LF) before putting the name in a
+        // header value to avoid response-header injection; then escape quotes.
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
+        const headerName = name.replace(/[\x00-\x1f\x7f]/g, '_');
+        const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         return new Response(Bun.file(abs).stream(), {
           headers: {
+            ...SAFE_CONTENT_HEADERS,
             'Content-Type': mime,
             'Content-Length': String(stat.size),
-            'Content-Disposition': `attachment; filename="${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+            'Content-Disposition': `attachment; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(name)}`,
           },
         });
       } catch (err) {

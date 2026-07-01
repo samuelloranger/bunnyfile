@@ -58,13 +58,25 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   // better-auth handles every /api/auth/* route. Register per-method so the
   // GET handler doesn't lose to the SPA fallback `.get('/*', ...)` below.
   .get('/api/auth/*', ({ request }) => auth.handler(request))
-  .post('/api/auth/*', ({ request, set }) => {
-    // Throttle password-reset requests to stop reset-email spam / enumeration
-    // timing. ponytail: reuse the share token-bucket (≈30/min per IP); add a
-    // dedicated stricter limiter only if abuse shows up.
+  .post('/api/auth/*', async ({ request, set, server }) => {
     const path = new URL(request.url).pathname;
-    if (path.endsWith('/request-password-reset') || path.endsWith('/forget-password')) {
-      if (!allowShareRequest(requestIp(request), 'password-reset')) {
+    // Block public self-registration once the instance is set up. The first
+    // user (admin) is created during /setup; afterwards new accounts come only
+    // from admin invites, which call auth.api server-side and bypass this HTTP
+    // route. Without this, /api/auth/sign-up/email is open to anyone.
+    if (path.endsWith('/sign-up/email')) {
+      const [row] = await db.select({ c: count() }).from(user);
+      if ((row?.c ?? 0) > 0) {
+        set.status = 403;
+        return { error: 'public sign-up is disabled — ask an admin for an invite' };
+      }
+    }
+    // Throttle credential endpoints to slow password brute-force and
+    // reset-email spam / enumeration. ponytail: reuse the share token-bucket
+    // (≈30/min per IP, keyed per path); tighten if abuse shows up.
+    const RATE_LIMITED = ['/sign-in/email', '/request-password-reset', '/forget-password'];
+    if (RATE_LIMITED.some((suffix) => path.endsWith(suffix))) {
+      if (!allowShareRequest(requestIp(request, server?.requestIP(request)?.address), path)) {
         set.status = 429;
         return { error: 'too many requests' };
       }
@@ -121,8 +133,12 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
       return { error: 'not found', path: url.pathname };
     }
     const candidate = join(WEB_DIST, url.pathname);
+    // Defense-in-depth against path traversal: `join` collapses `..`, so any
+    // attempt to escape the bundle dir lands outside WEB_DIST — refuse it and
+    // fall through to the SPA index.
+    const escapesDist = candidate !== WEB_DIST && !candidate.startsWith(`${WEB_DIST}/`);
     try {
-      if (statSync(candidate).isFile()) {
+      if (!escapesDist && statSync(candidate).isFile()) {
         if (url.pathname.startsWith('/assets/')) {
           set.headers['cache-control'] = 'public, max-age=31536000, immutable';
         } else {
