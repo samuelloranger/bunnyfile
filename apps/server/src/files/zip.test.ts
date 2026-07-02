@@ -62,4 +62,26 @@ describe('zip engine', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('stream cancellation terminates gracefully without crashing', async () => {
+    const root = await makeTree();
+    try {
+      const stream = createFolderZipStream(root);
+      const reader = stream.getReader();
+
+      // Read at least one chunk to trigger start
+      const { value, done } = await reader.read();
+      expect(done).toBe(false);
+      expect(value).toBeInstanceOf(Uint8Array);
+
+      // Cancel the stream
+      await reader.cancel();
+
+      // Subsequent reads should be done
+      const next = await reader.read();
+      expect(next.done).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

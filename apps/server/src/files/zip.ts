@@ -26,40 +26,78 @@ async function walkFiles(absRoot: string): Promise<{ abs: string; name: string }
  * pull-based zipper only if huge folders + slow clients cause memory pressure.
  */
 export function createFolderZipStream(absRoot: string): ReadableStream<Uint8Array> {
+  let closed = false;
+  let readStreamToCleanup: ReturnType<typeof createReadStream> | null = null;
+
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      let closed = false;
       const fail = (err: unknown) => {
         if (!closed) {
           closed = true;
-          controller.error(err instanceof Error ? err : new Error(String(err)));
+          try {
+            controller.error(err instanceof Error ? err : new Error(String(err)));
+          } catch (_) {}
         }
       };
       const zip = new Zip((err, chunk, final) => {
         if (err) return fail(err);
-        if (!closed) controller.enqueue(chunk);
+        if (!closed) {
+          try {
+            controller.enqueue(chunk);
+          } catch (_) {
+            closed = true;
+          }
+        }
         if (final && !closed) {
           closed = true;
-          controller.close();
+          try {
+            controller.close();
+          } catch (_) {}
         }
       });
       try {
         for (const f of await walkFiles(absRoot)) {
+          if (closed) break;
           const entry = new ZipPassThrough(f.name);
           zip.add(entry);
           await new Promise<void>((resolve, reject) => {
+            if (closed) return resolve();
             const rs = createReadStream(f.abs);
-            rs.on('data', (c) => entry.push(c as Uint8Array));
+            readStreamToCleanup = rs;
+            rs.on('data', (c) => {
+              if (closed) {
+                rs.destroy();
+                resolve();
+                return;
+              }
+              entry.push(c as Uint8Array);
+            });
             rs.on('end', () => {
-              entry.push(new Uint8Array(0), true);
+              readStreamToCleanup = null;
+              if (!closed) {
+                entry.push(new Uint8Array(0), true);
+              }
               resolve();
             });
-            rs.on('error', reject);
+            rs.on('error', (err) => {
+              readStreamToCleanup = null;
+              reject(err);
+            });
           });
         }
-        zip.end();
+        if (!closed) {
+          zip.end();
+        }
       } catch (err) {
         fail(err);
+      }
+    },
+    cancel() {
+      closed = true;
+      if (readStreamToCleanup) {
+        try {
+          readStreamToCleanup.destroy();
+        } catch (_) {}
       }
     },
   });
