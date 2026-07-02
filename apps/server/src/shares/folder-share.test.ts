@@ -18,14 +18,19 @@ mock.module('../auth/auth', () => ({
   },
 }));
 
-const [{ runMigrations }, { db }, { fileIndex, user }, { sharesRoutes }, { writeUpload, absFromRelOrThrow }] =
-  await Promise.all([
-    import('../db/migrate'),
-    import('../db'),
-    import('../db/schema'),
-    import('./routes'),
-    import('../files/store'),
-  ]);
+const [
+  { runMigrations },
+  { db },
+  { fileIndex, user },
+  { sharesRoutes },
+  { writeUpload, absFromRelOrThrow },
+] = await Promise.all([
+  import('../db/migrate'),
+  import('../db'),
+  import('../db/schema'),
+  import('./routes'),
+  import('../files/store'),
+]);
 
 const app = new Elysia().use(sharesRoutes);
 
