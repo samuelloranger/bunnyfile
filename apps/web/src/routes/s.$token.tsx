@@ -68,7 +68,7 @@ function PublicSharePage() {
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = `/api/shares/public/${encodeURIComponent(token)}/file`;
-      
+
       if (password.trim()) {
         const input = document.createElement('input');
         input.type = 'hidden';

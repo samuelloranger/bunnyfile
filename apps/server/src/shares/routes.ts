@@ -222,7 +222,13 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
 
   .post(
     '/api/shares/public/:token/verify',
-    async ({ request, params, body, set, server }): Promise<{ ok: boolean } | { error: string }> => {
+    async ({
+      request,
+      params,
+      body,
+      set,
+      server,
+    }): Promise<{ ok: boolean } | { error: string }> => {
       const ip = requestIp(request, server?.requestIP(request)?.address);
       if (!allowShareRequest(ip, params.token)) {
         set.status = 429;
