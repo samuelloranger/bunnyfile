@@ -69,13 +69,11 @@ function PublicSharePage() {
       form.method = 'POST';
       form.action = `/api/shares/public/${encodeURIComponent(token)}/file`;
 
-      if (password.trim()) {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = 'password';
-        input.value = password.trim();
-        form.appendChild(input);
-      }
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'password';
+      input.value = password.trim();
+      form.appendChild(input);
 
       document.body.appendChild(form);
       form.submit();

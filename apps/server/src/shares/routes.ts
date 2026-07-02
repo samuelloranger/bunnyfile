@@ -243,7 +243,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
 
       const row = state.row;
       if (row.passwordHash) {
-        if (!body.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
+        if (!body?.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
           set.status = 401;
           return { error: 'Password required or invalid.' };
         }
@@ -251,9 +251,11 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       return { ok: true };
     },
     {
-      body: t.Object({
-        password: t.Optional(t.String()),
-      }),
+      body: t.Optional(
+        t.Object({
+          password: t.Optional(t.String()),
+        }),
+      ),
     },
   )
 
@@ -274,7 +276,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
 
       const row = state.row;
       if (row.passwordHash) {
-        if (!body.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
+        if (!body?.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
           set.status = 401;
           return { error: 'Password required or invalid.' };
         }
@@ -355,8 +357,10 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       }
     },
     {
-      body: t.Object({
-        password: t.Optional(t.String()),
-      }),
+      body: t.Optional(
+        t.Object({
+          password: t.Optional(t.String()),
+        }),
+      ),
     },
   );
