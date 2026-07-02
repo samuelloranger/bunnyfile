@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth/auth';
@@ -6,7 +7,8 @@ import { fileIndex, type ShareLinkRow, shareLink } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf, safeRelPath } from '../files/paths';
 import { SAFE_CONTENT_HEADERS } from '../files/routes';
-import { openStream, PathError } from '../files/store';
+import { absFromRelOrThrow, openStream, PathError, removeShareZip } from '../files/store';
+import { buildShareZip, ensureShareZip } from './folder-zip';
 import { allowShareRequest, requestIp } from './rate-limit';
 
 function randomToken() {
@@ -61,12 +63,10 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
         return { error: 'invalid path' as const };
       }
 
-      const existing = await db
-        .select()
-        .from(fileIndex)
-        .where(eq(fileIndex.path, path))
-        .then((r) => r[0]);
-      if (!existing) {
+      let st: Awaited<ReturnType<typeof stat>>;
+      try {
+        st = await stat(absFromRelOrThrow(path));
+      } catch {
         set.status = 404;
         return { error: 'file not found' as const };
       }
@@ -74,6 +74,21 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       const token = randomToken();
       const id = crypto.randomUUID();
       const passwordHash = body.password ? await Bun.password.hash(body.password) : null;
+
+      if (st.isDirectory()) {
+        // Folder share: materialize a cached zip at .shares/<id>/<name>.zip.
+        await buildShareZip(id, path);
+      } else {
+        const existing = await db
+          .select()
+          .from(fileIndex)
+          .where(eq(fileIndex.path, path))
+          .then((r) => r[0]);
+        if (!existing) {
+          set.status = 404;
+          return { error: 'file not found' as const };
+        }
+      }
 
       await db.insert(shareLink).values({
         id,
@@ -145,6 +160,8 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       set.status = 404;
       return { error: 'not found' as const };
     }
+    // Delete the cached zip if this was a folder share (no-op for file shares).
+    await removeShareZip(params.id);
     return { ok: true as const };
   })
 
@@ -159,6 +176,28 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
     if (state.status !== 'ok') {
       set.status = 410;
       return { status: state.status, message: statusToMessage(state.status) };
+    }
+
+    let isDir = false;
+    try {
+      isDir = (await stat(absFromRelOrThrow(state.row.path))).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (isDir) {
+      const { size } = await ensureShareZip(state.row.id, state.row.path);
+      return {
+        status: 'ok' as const,
+        token: state.row.token,
+        path: state.row.path,
+        name: `${basenameOf(state.row.path)}.zip`,
+        size,
+        mime: 'application/zip',
+        requiresPassword: Boolean(state.row.passwordHash),
+        expiresAt: state.row.expiresAt,
+        maxDownloads: state.row.maxDownloads,
+        downloadCount: state.row.downloadCount,
+      };
     }
 
     const indexRow = await db
@@ -205,12 +244,35 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       }
 
       try {
-        const { path: abs, stat } = await openStream(row.path);
-        const mime = await db
-          .select({ mime: fileIndex.mime })
-          .from(fileIndex)
-          .where(eq(fileIndex.path, row.path))
-          .then((r) => r[0]?.mime ?? mimeFromName(basenameOf(row.path)));
+        const target = absFromRelOrThrow(row.path);
+        let isDir = false;
+        try {
+          isDir = (await stat(target)).isDirectory();
+        } catch {
+          isDir = false;
+        }
+
+        let fileAbs: string;
+        let byteSize: number;
+        let mime: string;
+        let downloadName: string;
+        if (isDir) {
+          const z = await ensureShareZip(row.id, row.path);
+          fileAbs = z.abs;
+          byteSize = z.size;
+          mime = 'application/zip';
+          downloadName = `${basenameOf(row.path)}.zip`;
+        } else {
+          const opened = await openStream(row.path);
+          fileAbs = opened.path;
+          byteSize = opened.stat.size;
+          mime = await db
+            .select({ mime: fileIndex.mime })
+            .from(fileIndex)
+            .where(eq(fileIndex.path, row.path))
+            .then((r) => r[0]?.mime ?? mimeFromName(basenameOf(row.path)));
+          downloadName = basenameOf(row.path);
+        }
 
         if (row.maxDownloads != null) {
           const updated = await db
@@ -234,18 +296,17 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
             .where(eq(shareLink.id, row.id));
         }
 
-        const name = basenameOf(row.path);
         // Strip control chars (incl. CR/LF) before putting the name in a
         // header value to avoid response-header injection; then escape quotes.
         // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
-        const headerName = name.replace(/[\x00-\x1f\x7f]/g, '_');
+        const headerName = downloadName.replace(/[\x00-\x1f\x7f]/g, '_');
         const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return new Response(Bun.file(abs).stream(), {
+        return new Response(Bun.file(fileAbs).stream(), {
           headers: {
             ...SAFE_CONTENT_HEADERS,
             'Content-Type': mime,
-            'Content-Length': String(stat.size),
-            'Content-Disposition': `attachment; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+            'Content-Length': String(byteSize),
+            'Content-Disposition': `attachment; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
           },
         });
       } catch (err) {
