@@ -1085,7 +1085,9 @@ function EntryRow({
   selected: boolean;
 }) {
   if (entry.kind === 'dir') {
-    return <DirectoryRow entry={entry} selected={selected} onNavigate={onNavigate} />;
+    return (
+      <DirectoryRow entry={entry} selected={selected} onNavigate={onNavigate} onShare={onShare} />
+    );
   }
 
   return (
@@ -1103,10 +1105,12 @@ function DirectoryRow({
   entry,
   selected,
   onNavigate,
+  onShare,
 }: {
   entry: Extract<ListedEntry, { kind: 'dir' }>;
   selected: boolean;
   onNavigate: (path: string) => void;
+  onShare: (path: string) => void;
 }) {
   const qc = useQueryClient();
   const del = useMutation({
@@ -1183,6 +1187,20 @@ function DirectoryRow({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem asChild>
+                  <a
+                    href={`/api/files/archive?path=${encodeURIComponent(entry.path)}`}
+                    download={`${entry.name}.zip`}
+                  >
+                    <Download /> Download .zip
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(e) => e.preventDefault()}
+                  onClick={() => onShare(entry.path)}
+                >
+                  <Share2 /> Share
+                </DropdownMenuItem>
                 <ConfirmDialog
                   trigger={
                     <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
@@ -1572,7 +1590,9 @@ function EntryCard({
   selected: boolean;
 }) {
   if (entry.kind === 'dir') {
-    return <DirectoryCard entry={entry} selected={selected} onNavigate={onNavigate} />;
+    return (
+      <DirectoryCard entry={entry} selected={selected} onNavigate={onNavigate} onShare={onShare} />
+    );
   }
 
   return <FileCard entry={entry} selected={selected} onPreview={onPreview} onShare={onShare} />;
@@ -1582,10 +1602,12 @@ function DirectoryCard({
   entry,
   selected,
   onNavigate,
+  onShare,
 }: {
   entry: Extract<ListedEntry, { kind: 'dir' }>;
   selected: boolean;
   onNavigate: (path: string) => void;
+  onShare: (path: string) => void;
 }) {
   const qc = useQueryClient();
   const del = useMutation({
@@ -1643,6 +1665,20 @@ function DirectoryCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem asChild>
+                <a
+                  href={`/api/files/archive?path=${encodeURIComponent(entry.path)}`}
+                  download={`${entry.name}.zip`}
+                >
+                  <Download /> Download .zip
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(e) => e.preventDefault()}
+                onClick={() => onShare(entry.path)}
+              >
+                <Share2 /> Share
+              </DropdownMenuItem>
               <ConfirmDialog
                 trigger={
                   <DropdownMenuItem destructive onSelect={(e) => e.preventDefault()}>
