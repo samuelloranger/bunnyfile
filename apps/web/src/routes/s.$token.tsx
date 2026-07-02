@@ -64,20 +64,9 @@ function PublicSharePage() {
         return;
       }
 
-      // Password is valid (or none required)! Submit natively to trigger a browser-level streaming download.
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = `/api/shares/public/${encodeURIComponent(token)}/file`;
-
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'password';
-      input.value = password.trim();
-      form.appendChild(input);
-
-      document.body.appendChild(form);
-      form.submit();
-      form.remove();
+      // Password is valid (or none required)! Trigger a native GET download.
+      const queryParams = password.trim() ? `?password=${encodeURIComponent(password.trim())}` : '';
+      window.location.href = `/api/shares/public/${encodeURIComponent(token)}/file${queryParams}`;
 
       // Show temporary downloading state for 5 seconds to give visual feedback, then reset loading state.
       setTimeout(() => {

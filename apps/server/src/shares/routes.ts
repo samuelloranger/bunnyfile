@@ -48,6 +48,109 @@ function statusToMessage(status: ShareStatus): string {
   return 'This share link does not exist.';
 }
 
+async function downloadHandler({
+  request,
+  params,
+  body,
+  query,
+  set,
+  server,
+  // biome-ignore lint/suspicious/noExplicitAny: Elysia handler context is complex to type statically
+}: any): Promise<Response | { error: string }> {
+  const ip = requestIp(request, server?.requestIP(request)?.address);
+  if (!allowShareRequest(ip, params.token)) {
+    set.status = 429;
+    return { error: 'Too many requests. Try again shortly.' };
+  }
+
+  const state = await getShareState(params.token);
+  if (state.status !== 'ok') {
+    set.status = 410;
+    return { error: statusToMessage(state.status) };
+  }
+
+  const row = state.row;
+  const password = body?.password ?? query?.password;
+  if (row.passwordHash) {
+    if (!password || !(await Bun.password.verify(password, row.passwordHash))) {
+      set.status = 401;
+      return { error: 'Password required or invalid.' };
+    }
+  }
+
+  try {
+    const target = absFromRelOrThrow(row.path);
+    let isDir = false;
+    try {
+      isDir = (await stat(target)).isDirectory();
+    } catch {
+      isDir = false;
+    }
+
+    let fileAbs: string;
+    let byteSize: number;
+    let mime: string;
+    let downloadName: string;
+    if (isDir) {
+      const z = await ensureShareZip(row.id, row.path);
+      fileAbs = z.abs;
+      byteSize = z.size;
+      mime = 'application/zip';
+      downloadName = `${basenameOf(row.path)}.zip`;
+    } else {
+      const opened = await openStream(row.path);
+      fileAbs = opened.path;
+      byteSize = opened.stat.size;
+      mime = await db
+        .select({ mime: fileIndex.mime })
+        .from(fileIndex)
+        .where(eq(fileIndex.path, row.path))
+        .then((r) => r[0]?.mime ?? mimeFromName(basenameOf(row.path)));
+      downloadName = basenameOf(row.path);
+    }
+
+    if (row.maxDownloads != null) {
+      const updated = await db
+        .update(shareLink)
+        .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
+        .where(
+          and(
+            eq(shareLink.id, row.id),
+            sql`${shareLink.downloadCount} < ${shareLink.maxDownloads}`,
+          ),
+        )
+        .returning({ id: shareLink.id });
+      if (updated.length === 0) {
+        set.status = 410;
+        return { error: statusToMessage('max_downloads') };
+      }
+    } else {
+      await db
+        .update(shareLink)
+        .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
+        .where(eq(shareLink.id, row.id));
+    }
+
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
+    const headerName = downloadName.replace(/[\x00-\x1f\x7f]/g, '_');
+    const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return new Response(Bun.file(fileAbs), {
+      headers: {
+        ...SAFE_CONTENT_HEADERS,
+        'Content-Type': mime,
+        'Content-Length': String(byteSize),
+        'Content-Disposition': `attachment; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
+      },
+    });
+  } catch (err) {
+    if (err instanceof PathError) {
+      set.status = 404;
+      return { error: 'file missing' };
+    }
+    throw err;
+  }
+}
+
 export const sharesRoutes = new Elysia({ name: 'shares' })
   .post(
     '/api/shares',
@@ -257,106 +360,14 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
     },
   )
 
-  .post(
-    '/api/shares/public/:token/file',
-    async ({ request, params, body, set, server }): Promise<Response | { error: string }> => {
-      const ip = requestIp(request, server?.requestIP(request)?.address);
-      if (!allowShareRequest(ip, params.token)) {
-        set.status = 429;
-        return { error: 'Too many requests. Try again shortly.' };
-      }
+  .get('/api/shares/public/:token/file', downloadHandler, {
+    query: t.Object({
+      password: t.Optional(t.String()),
+    }),
+  })
 
-      const state = await getShareState(params.token);
-      if (state.status !== 'ok') {
-        set.status = 410;
-        return { error: statusToMessage(state.status) };
-      }
-
-      const row = state.row;
-      if (row.passwordHash) {
-        if (!body?.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
-          set.status = 401;
-          return { error: 'Password required or invalid.' };
-        }
-      }
-
-      try {
-        const target = absFromRelOrThrow(row.path);
-        let isDir = false;
-        try {
-          isDir = (await stat(target)).isDirectory();
-        } catch {
-          isDir = false;
-        }
-
-        let fileAbs: string;
-        let byteSize: number;
-        let mime: string;
-        let downloadName: string;
-        if (isDir) {
-          const z = await ensureShareZip(row.id, row.path);
-          fileAbs = z.abs;
-          byteSize = z.size;
-          mime = 'application/zip';
-          downloadName = `${basenameOf(row.path)}.zip`;
-        } else {
-          const opened = await openStream(row.path);
-          fileAbs = opened.path;
-          byteSize = opened.stat.size;
-          mime = await db
-            .select({ mime: fileIndex.mime })
-            .from(fileIndex)
-            .where(eq(fileIndex.path, row.path))
-            .then((r) => r[0]?.mime ?? mimeFromName(basenameOf(row.path)));
-          downloadName = basenameOf(row.path);
-        }
-
-        if (row.maxDownloads != null) {
-          const updated = await db
-            .update(shareLink)
-            .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
-            .where(
-              and(
-                eq(shareLink.id, row.id),
-                sql`${shareLink.downloadCount} < ${shareLink.maxDownloads}`,
-              ),
-            )
-            .returning({ id: shareLink.id });
-          if (updated.length === 0) {
-            set.status = 410;
-            return { error: statusToMessage('max_downloads') };
-          }
-        } else {
-          await db
-            .update(shareLink)
-            .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
-            .where(eq(shareLink.id, row.id));
-        }
-
-        // Strip control chars (incl. CR/LF) before putting the name in a
-        // header value to avoid response-header injection; then escape quotes.
-        // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
-        const headerName = downloadName.replace(/[\x00-\x1f\x7f]/g, '_');
-        const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return new Response(Bun.file(fileAbs), {
-          headers: {
-            ...SAFE_CONTENT_HEADERS,
-            'Content-Type': mime,
-            'Content-Length': String(byteSize),
-            'Content-Disposition': `attachment; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
-          },
-        });
-      } catch (err) {
-        if (err instanceof PathError) {
-          set.status = 404;
-          return { error: 'file missing' };
-        }
-        throw err;
-      }
-    },
-    {
-      body: t.Object({
-        password: t.Optional(t.String()),
-      }),
-    },
-  );
+  .post('/api/shares/public/:token/file', downloadHandler, {
+    body: t.Object({
+      password: t.Optional(t.String()),
+    }),
+  });
