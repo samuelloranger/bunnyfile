@@ -4,7 +4,13 @@ import { unzipSync } from 'fflate';
 import { db } from '../db';
 import { fileIndex } from '../db/schema';
 import { absFromRelOrThrow, removeShareZip, writeUpload } from '../files/store';
-import { buildShareZip, ensureShareZip, folderFingerprint, zipRelForShare } from './folder-zip';
+import {
+  buildShareZip,
+  ensureShareZip,
+  folderFingerprint,
+  fpRelForShare,
+  zipRelForShare,
+} from './folder-zip';
 
 async function seedFile(path: string, bytes: string) {
   await writeUpload(path, new Response(bytes).body as ReadableStream<Uint8Array>);
@@ -42,6 +48,11 @@ describe('folder-zip cache', () => {
     await seedFile(`${folder}/a.txt`, 'one');
     try {
       await buildShareZip(id, folder);
+      // sidecar fingerprint must match the folder's current (unchanged) state —
+      // regression guard for capturing the fingerprint before zipping, not after.
+      const sidecarFp = await readFile(absFromRelOrThrow(fpRelForShare(id)), 'utf8');
+      expect(sidecarFp).toBe(await folderFingerprint(folder));
+
       const first = await ensureShareZip(id, folder);
       const mtime1 = (await stat(first.abs)).mtimeMs;
 

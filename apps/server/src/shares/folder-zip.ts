@@ -18,7 +18,7 @@ export function zipRelForShare(id: string, folderRel: string): string {
   return `.shares/${id}/${basenameOf(folderRel)}.zip`;
 }
 
-function fpRelForShare(id: string): string {
+export function fpRelForShare(id: string): string {
   return `.shares/${id}/.fp`;
 }
 
@@ -35,10 +35,11 @@ export async function folderFingerprint(folderRel: string): Promise<string> {
   return `${agg?.count ?? 0}:${agg?.maxM ?? 0}:${agg?.sumS ?? 0}`;
 }
 
-export async function buildShareZip(id: string, folderRel: string): Promise<void> {
+export async function buildShareZip(id: string, folderRel: string, fp?: string): Promise<void> {
+  const want = fp ?? (await folderFingerprint(folderRel));
   const zipAbs = absFromRelOrThrow(zipRelForShare(id, folderRel));
   await zipFolderToFile(absFromRelOrThrow(folderRel), zipAbs);
-  await writeFile(absFromRelOrThrow(fpRelForShare(id)), await folderFingerprint(folderRel), 'utf8');
+  await writeFile(absFromRelOrThrow(fpRelForShare(id)), want, 'utf8');
 }
 
 export async function ensureShareZip(
@@ -66,7 +67,7 @@ export async function ensureShareZip(
       }
     }
     if (!fresh) {
-      const p = buildShareZip(id, folderRel).finally(() => rebuilds.delete(id));
+      const p = buildShareZip(id, folderRel, want).finally(() => rebuilds.delete(id));
       rebuilds.set(id, p);
       await p;
     }
