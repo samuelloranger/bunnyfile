@@ -221,6 +221,37 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
   })
 
   .post(
+    '/api/shares/public/:token/verify',
+    async ({ request, params, body, set, server }): Promise<{ ok: boolean } | { error: string }> => {
+      const ip = requestIp(request, server?.requestIP(request)?.address);
+      if (!allowShareRequest(ip, params.token)) {
+        set.status = 429;
+        return { error: 'Too many requests. Try again shortly.' };
+      }
+
+      const state = await getShareState(params.token);
+      if (state.status !== 'ok') {
+        set.status = 410;
+        return { error: statusToMessage(state.status) };
+      }
+
+      const row = state.row;
+      if (row.passwordHash) {
+        if (!body.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
+          set.status = 401;
+          return { error: 'Password required or invalid.' };
+        }
+      }
+      return { ok: true };
+    },
+    {
+      body: t.Object({
+        password: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  .post(
     '/api/shares/public/:token/file',
     async ({ request, params, body, set, server }): Promise<Response | { error: string }> => {
       const ip = requestIp(request, server?.requestIP(request)?.address);

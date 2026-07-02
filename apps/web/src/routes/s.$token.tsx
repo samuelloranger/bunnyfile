@@ -31,10 +31,11 @@ function PublicSharePage() {
   const status =
     share.data && 'status' in share.data && share.data.status !== 'ok' ? share.data.status : null;
 
+  const [downloading, setDownloading] = useState(false);
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    // Always handle in-page: a native form POST would navigate the tab to the
-    // raw JSON error on a wrong password instead of showing a message.
     e.preventDefault();
+    if (downloading) return;
     setPasswordError(null);
     const needsPw =
       share.data && 'status' in share.data && share.data.status === 'ok'
@@ -45,33 +46,48 @@ function PublicSharePage() {
       return;
     }
     try {
-      const res = await fetch(`/api/shares/public/${encodeURIComponent(token)}/file`, {
+      setDownloading(true);
+      // Validate password first
+      const res = await fetch(`/api/shares/public/${encodeURIComponent(token)}/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(password.trim() ? { password: password.trim() } : {}),
       });
       if (!res.ok) {
-        let msg = 'Download failed.';
+        let msg = 'Verification failed.';
         try {
           const body = (await res.json()) as { error?: string };
           if (body?.error) msg = body.error;
-        } catch {
-          // non-JSON error body — keep the generic message
-        }
+        } catch {}
         setPasswordError(msg);
+        setDownloading(false);
         return;
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = okShare?.name ?? 'download';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+
+      // Password is valid (or none required)! Submit natively to trigger a browser-level streaming download.
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = `/api/shares/public/${encodeURIComponent(token)}/file`;
+      
+      if (password.trim()) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'password';
+        input.value = password.trim();
+        form.appendChild(input);
+      }
+
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
+
+      // Show temporary downloading state for 5 seconds to give visual feedback, then reset loading state.
+      setTimeout(() => {
+        setDownloading(false);
+      }, 5000);
     } catch {
       setPasswordError('Download failed. Please try again.');
+      setDownloading(false);
     }
   }
 
@@ -169,8 +185,13 @@ function PublicSharePage() {
                   </div>
                 )}
 
-                <Button type="submit" className="w-full" leftIcon={<Download />}>
-                  Download file
+                <Button
+                  type="submit"
+                  className="w-full"
+                  loading={downloading}
+                  leftIcon={!downloading && <Download />}
+                >
+                  {downloading ? 'Starting download...' : 'Download file'}
                 </Button>
               </form>
             </div>
