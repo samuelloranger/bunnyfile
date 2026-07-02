@@ -37,7 +37,7 @@ export const SAFE_CONTENT_HEADERS = {
 // Internal storage areas the user-facing files API must never touch: the S3
 // object tree, trash, and multipart scratch. (The S3 API addresses `s3/...`
 // through its own resolver; the web file API must not.)
-const RESERVED_TOP_SEGMENTS = new Set(['s3', '.trash', '.multipart']);
+const RESERVED_TOP_SEGMENTS = new Set(['s3', '.trash', '.multipart', '.shares']);
 
 /** Validate a user-supplied path AND reject reserved internal prefixes. */
 function userRel(raw: string | null | undefined): string | null {

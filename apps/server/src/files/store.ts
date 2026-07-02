@@ -260,6 +260,11 @@ export async function removeTrashPath(trashRel: string): Promise<void> {
   await rm(path, { recursive: true, force: true });
 }
 
+/** Delete a folder-share's cached zip directory. No-op if it doesn't exist. */
+export async function removeShareZip(id: string): Promise<void> {
+  await rm(absFromRelOrThrow(`.shares/${id}`), { recursive: true, force: true });
+}
+
 export async function moveFile(fromRel: string, toRel: string): Promise<void> {
   assertNotRoot(fromRel);
   assertNotRoot(toRel);

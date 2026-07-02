@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -103,6 +103,20 @@ describe('storage-root protection', () => {
     await expect(removeFolder('.')).rejects.toMatchObject({ code: 'traversal' });
     await expect(removeFolder('')).rejects.toMatchObject({ code: 'traversal' });
     await expect(moveFile('/', 'somewhere')).rejects.toMatchObject({ code: 'traversal' });
+  });
+});
+
+describe('removeShareZip', () => {
+  it('removes .shares/<id> and is a no-op when absent', async () => {
+    const { removeShareZip, absFromRelOrThrow, DATA_ROOT } = await import('./store');
+    const id = crypto.randomUUID();
+    const dir = absFromRelOrThrow(`.shares/${id}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(absFromRelOrThrow(`.shares/${id}/x.zip`), 'z');
+    await removeShareZip(id); // removes it
+    await expect(stat(dir)).rejects.toThrow();
+    await removeShareZip(id); // no throw second time
+    expect(DATA_ROOT).toBeTruthy();
   });
 });
 
