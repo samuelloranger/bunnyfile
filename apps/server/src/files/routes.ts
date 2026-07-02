@@ -1,4 +1,4 @@
-import { statfs } from 'node:fs/promises';
+import { stat, statfs } from 'node:fs/promises';
 import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth/auth';
@@ -24,6 +24,7 @@ import {
   writeUpload,
 } from './store';
 import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
+import { createFolderZipStream } from './zip';
 
 // Stored-XSS neutralizer for user-controlled bytes: `sandbox` stops any script
 // execution if the file is navigated to or iframed (e.g. an uploaded .html),
@@ -599,6 +600,47 @@ export const filesRoutes = new Elysia({ name: 'files' })
     },
     {
       query: t.Object({ path: t.String() }),
+    },
+  )
+
+  .get(
+    '/api/files/archive',
+    async ({ request, query, set }): Promise<Response | { error: string }> => {
+      const s = await callerFromRequest(request);
+      if (!s?.user) {
+        set.status = 401;
+        return { error: 'unauthorized' as const };
+      }
+      const path = userRel(query.path);
+      if (!path) {
+        set.status = 400;
+        return { error: 'invalid path' as const };
+      }
+      const abs = absFromRelOrThrow(path);
+      let isDir = false;
+      try {
+        isDir = (await stat(abs)).isDirectory();
+      } catch {
+        isDir = false;
+      }
+      if (!isDir) {
+        set.status = 404;
+        return { error: 'not a folder' as const };
+      }
+      const name = `${basenameOf(path)}.zip`;
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
+      const headerName = name.replace(/[\x00-\x1f\x7f]/g, '_');
+      const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      return new Response(createFolderZipStream(abs), {
+        headers: {
+          ...SAFE_CONTENT_HEADERS,
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        },
+      });
+    },
+    {
+      query: t.Object({ path: t.String({ minLength: 1 }) }),
     },
   )
 
