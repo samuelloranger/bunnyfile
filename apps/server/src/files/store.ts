@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
+import { type FileHandle, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { trackUpload } from '../inflight';
 import { resolveInRoot, safeRelPath } from './paths';
@@ -336,4 +336,29 @@ export async function hashOnDisk(
     h.update(chunk);
   }
   return h.digest('hex');
+}
+
+/** Create a memory-safe pull-based ReadableStream for streaming files of any size without buffering. */
+export function createFileStream(path: string, chunkSize = 256 * 1024): ReadableStream<Uint8Array> {
+  let fd: FileHandle | null = null;
+  return new ReadableStream({
+    async start() {
+      fd = await open(path, 'r');
+    },
+    async pull(controller) {
+      const buffer = new Uint8Array(chunkSize);
+      const { bytesRead } = await fd.read(buffer, 0, chunkSize, null);
+      if (bytesRead === 0) {
+        await fd.close();
+        controller.close();
+      } else {
+        controller.enqueue(buffer.subarray(0, bytesRead));
+      }
+    },
+    async cancel() {
+      if (fd) {
+        await fd.close();
+      }
+    },
+  });
 }

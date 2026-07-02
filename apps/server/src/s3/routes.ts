@@ -7,6 +7,7 @@ import { s3Object } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
 import {
+  createFileStream,
   DATA_ROOT,
   hashOnDisk,
   openStream,
@@ -614,7 +615,7 @@ function createS3Handler() {
           },
         });
       }
-      return new Response(Bun.file(opened.path), { status: 200, headers });
+      return new Response(createFileStream(opened.path), { status: 200, headers });
     }
 
     if (request.method === 'DELETE') {

@@ -11,6 +11,7 @@ import { scan } from './scanner';
 import { deleteFileSearch, deleteFileSearchPrefix, searchFiles, upsertFileSearch } from './search';
 import {
   absFromRelOrThrow,
+  createFileStream,
   createFolder,
   DATA_ROOT,
   listImmediateDirectories,
@@ -578,7 +579,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
           });
         }
 
-        return new Response(Bun.file(abs), {
+        return new Response(createFileStream(abs), {
           headers: {
             ...SAFE_CONTENT_HEADERS,
             'Accept-Ranges': 'bytes',

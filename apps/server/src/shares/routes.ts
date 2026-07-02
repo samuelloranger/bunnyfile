@@ -7,7 +7,13 @@ import { fileIndex, type ShareLinkRow, shareLink } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf, safeRelPath } from '../files/paths';
 import { SAFE_CONTENT_HEADERS } from '../files/routes';
-import { absFromRelOrThrow, openStream, PathError, removeShareZip } from '../files/store';
+import {
+  absFromRelOrThrow,
+  createFileStream,
+  openStream,
+  PathError,
+  removeShareZip,
+} from '../files/store';
 import { buildShareZip, ensureShareZip } from './folder-zip';
 import { allowShareRequest, requestIp } from './rate-limit';
 
@@ -134,7 +140,7 @@ async function downloadHandler({
     // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
     const headerName = downloadName.replace(/[\x00-\x1f\x7f]/g, '_');
     const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    return new Response(Bun.file(fileAbs), {
+    return new Response(createFileStream(fileAbs), {
       headers: {
         ...SAFE_CONTENT_HEADERS,
         'Content-Type': mime,
