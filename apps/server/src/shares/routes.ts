@@ -1,4 +1,3 @@
-import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
@@ -302,7 +301,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
         // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
         const headerName = downloadName.replace(/[\x00-\x1f\x7f]/g, '_');
         const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return new Response(createReadStream(fileAbs) as any, {
+        return new Response(Bun.file(fileAbs), {
           headers: {
             ...SAFE_CONTENT_HEADERS,
             'Content-Type': mime,

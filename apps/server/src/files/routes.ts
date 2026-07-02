@@ -1,4 +1,3 @@
-import { createReadStream } from 'node:fs';
 import { stat, statfs } from 'node:fs/promises';
 import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
@@ -579,7 +578,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
           });
         }
 
-        return new Response(createReadStream(abs) as any, {
+        return new Response(Bun.file(abs), {
           headers: {
             ...SAFE_CONTENT_HEADERS,
             'Accept-Ranges': 'bytes',

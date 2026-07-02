@@ -1,4 +1,3 @@
-import { createReadStream } from 'node:fs';
 import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -615,7 +614,7 @@ function createS3Handler() {
           },
         });
       }
-      return new Response(createReadStream(opened.path) as any, { status: 200, headers });
+      return new Response(Bun.file(opened.path), { status: 200, headers });
     }
 
     if (request.method === 'DELETE') {
