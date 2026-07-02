@@ -57,8 +57,12 @@ Zips live at a reserved, hidden path:
   or the browser.
 - Add `.shares` to `RESERVED_TOP_SEGMENTS` (`apps/server/src/files/routes.ts`)
   so users can't write into it via normal file ops.
-- `shareLink.path` = the zip rel path. **"Is this a folder-zip share?"** =
-  `path` starts with `.shares/`. **No DB migration.**
+- `shareLink.path` = the **shared path verbatim** (the folder path for a
+  folder share, the file path for a file share — unchanged for files).
+  Storing the folder path is required so rebuild-on-change can re-zip the
+  source. **"Is this a folder share?"** = `stat(path).isDirectory()` at serve
+  time. The zip path is derived: `.shares/<id>/<basename(path)>.zip`.
+  **No DB migration.**
 
 ## Rebuild-on-access (the "rebuild on change" behavior)
 
@@ -98,18 +102,19 @@ disk↔index consistency model; the zip self-heals on the next tick + download.
 - **`POST /api/shares`**: `stat` the path first.
   - Directory → generate id + token, build zip to
     `.shares/<id>/<basename>.zip` + `.fp`, insert `shareLink` with
-    `path = <zip rel path>`. Password / expiry / maxDownloads unchanged.
+    `path = <folder path>`. Password / expiry / maxDownloads unchanged.
   - Regular file → existing behavior (requires a `file_index` row), unchanged.
   - Neither (missing) → 404.
-- **`GET /api/shares/public/:token`** (metadata): for `.shares/` paths, take
-  `size` from an on-disk `stat` of the (freshly ensured) zip instead of
-  `file_index` (which never has the dot-path zip). `name` = basename =
-  `<foldername>.zip`.
-- **`POST /api/shares/public/:token/file`** (download): ensure-fresh
-  (rebuild-on-access) before streaming; `Content-Length` from the zip's
-  `stat.size`. Rest unchanged.
+- **`GET /api/shares/public/:token`** (metadata): if `stat(path)` is a
+  directory, ensure the zip fresh, take `size` from its on-disk `stat`, set
+  `mime = application/zip`, `name = <foldername>.zip`. Else existing file
+  metadata.
+- **`POST /api/shares/public/:token/file`** (download): if the path is a
+  directory, ensure-fresh (rebuild-on-access) then stream the zip
+  (`Content-Length` from the zip's `stat.size`, filename `<foldername>.zip`).
+  Else existing file streaming. Download-count increment unchanged.
 - **`DELETE /api/shares/:id`**: after revoking, `rm('.shares/<id>',
-  {recursive, force})`. No-op for file shares.
+  {recursive, force})`. No-op for file shares (nothing at that path).
 
 `apps/server/src/files/store.ts`
 
