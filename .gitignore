@@ -36,3 +36,6 @@ bun.lock
 
 # stray test artifacts
 apps/server/test.txt
+
+# CodeGraph index (local only)
+.codegraph/
