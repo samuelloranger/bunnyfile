@@ -76,6 +76,7 @@ Designed to be safe behind a reverse proxy. What's in the box:
 
 - Set `BETTER_AUTH_SECRET` to a random 32-byte value before first boot (a dev default is used otherwise and logs a warning).
 - Terminate TLS at a reverse proxy (see `deploy/compose/caddy.yml`) — don't expose `:3901` directly.
+- Behind Caddy (or any reverse proxy), set `TRUST_PROXY=1` so share rate limits use the real client IP from `X-Forwarded-For`. Optionally set `TRUSTED_PROXIES` to a comma-separated IPv4/CIDR allowlist of proxy peers (e.g. `10.0.0.0/8`); without it, any peer is trusted when `TRUST_PROXY` is on.
 - Restrict cross-origin access with `WEB_ORIGIN` when serving from a custom domain.
 
 > Found a vulnerability? Open a private security advisory on GitHub rather than a public issue.
