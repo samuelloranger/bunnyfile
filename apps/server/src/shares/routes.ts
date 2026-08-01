@@ -55,6 +55,47 @@ function statusToMessage(status: ShareStatus): string {
   return 'This share link does not exist.';
 }
 
+async function buildUnlockedPublicMeta(row: ShareLinkRow) {
+  let isDir = false;
+  try {
+    isDir = (await stat(absFromRelOrThrow(row.path))).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (isDir) {
+    const { size } = await ensureShareZip(row.id, row.path);
+    return {
+      token: row.token,
+      path: row.path,
+      name: `${basenameOf(row.path)}.zip`,
+      size,
+      mime: 'application/zip' as const,
+      requiresPassword: Boolean(row.passwordHash),
+      expiresAt: row.expiresAt,
+      maxDownloads: row.maxDownloads,
+      downloadCount: row.downloadCount,
+    };
+  }
+
+  const indexRow = await db
+    .select()
+    .from(fileIndex)
+    .where(eq(fileIndex.path, row.path))
+    .then((r) => r[0]);
+
+  return {
+    token: row.token,
+    path: row.path,
+    name: basenameOf(row.path),
+    size: indexRow?.size ?? null,
+    mime: indexRow?.mime ?? mimeFromName(basenameOf(row.path)),
+    requiresPassword: Boolean(row.passwordHash),
+    expiresAt: row.expiresAt,
+    maxDownloads: row.maxDownloads,
+    downloadCount: row.downloadCount,
+  };
+}
+
 async function downloadHandler({
   request,
   params,
@@ -298,45 +339,11 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       };
     }
 
-    let isDir = false;
-    try {
-      isDir = (await stat(absFromRelOrThrow(state.row.path))).isDirectory();
-    } catch {
-      isDir = false;
-    }
-    if (isDir) {
-      const { size } = await ensureShareZip(state.row.id, state.row.path);
-      return {
-        status: 'ok' as const,
-        token: state.row.token,
-        path: state.row.path,
-        name: `${basenameOf(state.row.path)}.zip`,
-        size,
-        mime: 'application/zip',
-        requiresPassword: false as const,
-        expiresAt: state.row.expiresAt,
-        maxDownloads: state.row.maxDownloads,
-        downloadCount: state.row.downloadCount,
-      };
-    }
-
-    const indexRow = await db
-      .select()
-      .from(fileIndex)
-      .where(eq(fileIndex.path, state.row.path))
-      .then((r) => r[0]);
-
+    const meta = await buildUnlockedPublicMeta(state.row);
     return {
       status: 'ok' as const,
-      token: state.row.token,
-      path: state.row.path,
-      name: basenameOf(state.row.path),
-      size: indexRow?.size ?? null,
-      mime: indexRow?.mime ?? mimeFromName(basenameOf(state.row.path)),
+      ...meta,
       requiresPassword: false as const,
-      expiresAt: state.row.expiresAt,
-      maxDownloads: state.row.maxDownloads,
-      downloadCount: state.row.downloadCount,
     };
   })
 
@@ -348,7 +355,9 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       body,
       set,
       server,
-    }): Promise<{ ok: boolean } | { error: string }> => {
+    }): Promise<
+      ({ ok: true } & Awaited<ReturnType<typeof buildUnlockedPublicMeta>>) | { error: string }
+    > => {
       const ip = requestIp(request, server?.requestIP(request)?.address);
       if (!allowShareRequest(ip, params.token)) {
         set.status = 429;
@@ -368,7 +377,8 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
           return { error: 'Password required or invalid.' };
         }
       }
-      return { ok: true };
+      const meta = await buildUnlockedPublicMeta(row);
+      return { ok: true as const, ...meta };
     },
     {
       body: t.Object({

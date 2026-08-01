@@ -120,6 +120,33 @@ describe('shares routes', () => {
     expect(res.status).toBe(401);
   });
 
+  it('verify returns full metadata after correct password', async () => {
+    const createRes = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'hello.txt', password: 'secret123' }),
+    });
+    expect(createRes.status).toBe(200);
+    const { token } = (await createRes.json()) as { token: string };
+
+    const res = await request(`/api/shares/public/${token}/verify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'secret123' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      name: string;
+      size: number;
+      requiresPassword: boolean;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.name).toBe('hello.txt');
+    expect(body.size).toBeGreaterThan(0);
+    expect(body.requiresPassword).toBe(true);
+  });
+
   it('creates share, validates password, and enforces max downloads', async () => {
     const createRes = await request('/api/shares', {
       method: 'POST',
