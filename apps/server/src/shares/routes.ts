@@ -3,20 +3,17 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth/auth';
 import { db } from '../db';
-import { fileIndex, type ShareLinkRow, shareLink } from '../db/schema';
-import { mimeFromName } from '../files/mime';
-import { basenameOf } from '../files/paths';
-import { SAFE_CONTENT_HEADERS } from '../files/routes';
-import {
-  absFromRelOrThrow,
-  createFileStream,
-  openStream,
-  PathError,
-  removeShareZip,
-} from '../files/store';
+import { fileIndex, shareLink } from '../db/schema';
+import { absFromRelOrThrow } from '../files/store';
 import { userRel } from '../files/user-path';
-import { attachDownloadLease } from './download-lease';
-import { buildShareZip, ensureShareZip } from './folder-zip';
+import {
+  beginDownload,
+  inspect,
+  invalidateFolderArtifact,
+  prepareFolderArtifact,
+  type SharePublicMeta,
+  verify,
+} from './access';
 import { allowShareRequest, requestIp } from './rate-limit';
 
 function randomToken() {
@@ -25,76 +22,6 @@ function randomToken() {
 
 async function callerFromRequest(request: Request) {
   return auth.api.getSession({ headers: request.headers });
-}
-
-type ShareStatus = 'ok' | 'not_found' | 'expired' | 'revoked' | 'max_downloads';
-type ShareState =
-  | { status: 'ok'; row: ShareLinkRow }
-  | { status: Exclude<ShareStatus, 'ok'>; row?: ShareLinkRow };
-
-async function getShareState(token: string): Promise<ShareState> {
-  const row = await db
-    .select()
-    .from(shareLink)
-    .where(eq(shareLink.token, token))
-    .then((r) => r[0]);
-  if (!row) return { status: 'not_found' };
-  if (row.revokedAt) return { status: 'revoked', row };
-  if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) {
-    return { status: 'expired', row };
-  }
-  if (row.maxDownloads != null && row.downloadCount >= row.maxDownloads) {
-    return { status: 'max_downloads', row };
-  }
-  return { status: 'ok', row };
-}
-
-function statusToMessage(status: ShareStatus): string {
-  if (status === 'expired') return 'This share link has expired.';
-  if (status === 'revoked') return 'This share link has been revoked.';
-  if (status === 'max_downloads') return 'This share link reached its download limit.';
-  return 'This share link does not exist.';
-}
-
-async function buildUnlockedPublicMeta(row: ShareLinkRow) {
-  let isDir = false;
-  try {
-    isDir = (await stat(absFromRelOrThrow(row.path))).isDirectory();
-  } catch {
-    isDir = false;
-  }
-  if (isDir) {
-    const { size } = await ensureShareZip(row.id, row.path);
-    return {
-      token: row.token,
-      path: row.path,
-      name: `${basenameOf(row.path)}.zip`,
-      size,
-      mime: 'application/zip' as const,
-      requiresPassword: Boolean(row.passwordHash),
-      expiresAt: row.expiresAt,
-      maxDownloads: row.maxDownloads,
-      downloadCount: row.downloadCount,
-    };
-  }
-
-  const indexRow = await db
-    .select()
-    .from(fileIndex)
-    .where(eq(fileIndex.path, row.path))
-    .then((r) => r[0]);
-
-  return {
-    token: row.token,
-    path: row.path,
-    name: basenameOf(row.path),
-    size: indexRow?.size ?? null,
-    mime: indexRow?.mime ?? mimeFromName(basenameOf(row.path)),
-    requiresPassword: Boolean(row.passwordHash),
-    expiresAt: row.expiresAt,
-    maxDownloads: row.maxDownloads,
-    downloadCount: row.downloadCount,
-  };
 }
 
 async function downloadHandler({
@@ -111,108 +38,21 @@ async function downloadHandler({
     return { error: 'Too many requests. Try again shortly.' };
   }
 
-  const state = await getShareState(params.token);
-  if (state.status !== 'ok') {
-    set.status = 410;
-    return { error: statusToMessage(state.status) };
-  }
-
-  const row = state.row;
-  const password = body?.password;
-  if (row.passwordHash) {
-    if (!password || !(await Bun.password.verify(password, row.passwordHash))) {
+  const result = await beginDownload(params.token, body?.password);
+  if (!result.ok) {
+    if (result.error === 'unauthorized') {
       set.status = 401;
-      return { error: 'Password required or invalid.' };
+      return { error: result.message };
     }
-  }
-
-  try {
-    const target = absFromRelOrThrow(row.path);
-    let isDir = false;
-    try {
-      isDir = (await stat(target)).isDirectory();
-    } catch {
-      isDir = false;
-    }
-
-    let fileAbs: string;
-    let byteSize: number;
-    let mime: string;
-    let downloadName: string;
-    if (isDir) {
-      const z = await ensureShareZip(row.id, row.path);
-      fileAbs = z.abs;
-      byteSize = z.size;
-      mime = 'application/zip';
-      downloadName = `${basenameOf(row.path)}.zip`;
-    } else {
-      const opened = await openStream(row.path);
-      fileAbs = opened.path;
-      byteSize = opened.stat.size;
-      mime = await db
-        .select({ mime: fileIndex.mime })
-        .from(fileIndex)
-        .where(eq(fileIndex.path, row.path))
-        .then((r) => r[0]?.mime ?? mimeFromName(basenameOf(row.path)));
-      downloadName = basenameOf(row.path);
-    }
-
-    if (row.maxDownloads != null) {
-      const updated = await db
-        .update(shareLink)
-        .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
-        .where(
-          and(
-            eq(shareLink.id, row.id),
-            sql`${shareLink.downloadCount} < ${shareLink.maxDownloads}`,
-          ),
-        )
-        .returning({ id: shareLink.id });
-      if (updated.length === 0) {
-        set.status = 410;
-        return { error: statusToMessage('max_downloads') };
-      }
-    }
-
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
-    const headerName = downloadName.replace(/[\x00-\x1f\x7f]/g, '_');
-    const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-
-    const leased = row.maxDownloads != null;
-    const stream = attachDownloadLease(createFileStream(fileAbs), {
-      onComplete: async () => {
-        if (!leased) {
-          await db
-            .update(shareLink)
-            .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
-            .where(eq(shareLink.id, row.id));
-        }
-      },
-      onCancel: async () => {
-        if (leased) {
-          await db
-            .update(shareLink)
-            .set({ downloadCount: sql`max(${shareLink.downloadCount} - 1, 0)` })
-            .where(eq(shareLink.id, row.id));
-        }
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        ...SAFE_CONTENT_HEADERS,
-        'Content-Type': mime,
-        'Content-Length': String(byteSize),
-        'Content-Disposition': `attachment; filename="${quoted}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
-      },
-    });
-  } catch (err) {
-    if (err instanceof PathError) {
+    if (result.error === 'missing') {
       set.status = 404;
-      return { error: 'file missing' };
+      return { error: result.message };
     }
-    throw err;
+    set.status = 410;
+    return { error: result.message };
   }
+
+  return new Response(result.stream, { headers: result.headers });
 }
 
 export const sharesRoutes = new Elysia({ name: 'shares' })
@@ -243,8 +83,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       const passwordHash = body.password ? await Bun.password.hash(body.password) : null;
 
       if (st.isDirectory()) {
-        // Folder share: materialize a cached zip at .shares/<id>/<name>.zip.
-        await buildShareZip(id, path);
+        await prepareFolderArtifact(id, path);
       } else {
         const existing = await db
           .select()
@@ -327,8 +166,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       set.status = 404;
       return { error: 'not found' as const };
     }
-    // Delete the cached zip if this was a folder share (no-op for file shares).
-    await removeShareZip(params.id);
+    await invalidateFolderArtifact(params.id);
     return { ok: true as const };
   })
 
@@ -339,24 +177,21 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       return { error: 'Too many requests. Try again shortly.' };
     }
 
-    const state = await getShareState(params.token);
-    if (state.status !== 'ok') {
+    const result = await inspect(params.token);
+    if (result.status === 'unavailable') {
       set.status = 410;
-      return { status: state.status, message: statusToMessage(state.status) };
+      return { status: result.reason, message: result.message };
     }
-
-    const requiresPassword = Boolean(state.row.passwordHash);
-    if (requiresPassword) {
+    if (result.status === 'locked') {
       return {
         status: 'ok' as const,
         requiresPassword: true as const,
-        expiresAt: state.row.expiresAt,
-        maxDownloads: state.row.maxDownloads,
-        downloadCount: state.row.downloadCount,
+        expiresAt: result.expiresAt,
+        maxDownloads: result.maxDownloads,
+        downloadCount: result.downloadCount,
       };
     }
-
-    const meta = await buildUnlockedPublicMeta(state.row);
+    const { status: _unlocked, requiresPassword: _rp, ...meta } = result;
     return {
       status: 'ok' as const,
       ...meta,
@@ -372,30 +207,23 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       body,
       set,
       server,
-    }): Promise<
-      ({ ok: true } & Awaited<ReturnType<typeof buildUnlockedPublicMeta>>) | { error: string }
-    > => {
+    }): Promise<({ ok: true } & SharePublicMeta) | { error: string }> => {
       const ip = requestIp(request, server?.requestIP(request)?.address);
       if (!allowShareRequest(ip, params.token)) {
         set.status = 429;
         return { error: 'Too many requests. Try again shortly.' };
       }
 
-      const state = await getShareState(params.token);
-      if (state.status !== 'ok') {
-        set.status = 410;
-        return { error: statusToMessage(state.status) };
-      }
-
-      const row = state.row;
-      if (row.passwordHash) {
-        if (!body.password || !(await Bun.password.verify(body.password, row.passwordHash))) {
+      const result = await verify(params.token, body.password);
+      if (!result.ok) {
+        if (result.error === 'unauthorized') {
           set.status = 401;
-          return { error: 'Password required or invalid.' };
+          return { error: result.message };
         }
+        set.status = 410;
+        return { error: result.message };
       }
-      const meta = await buildUnlockedPublicMeta(row);
-      return { ok: true as const, ...meta };
+      return result;
     },
     {
       body: t.Object({
