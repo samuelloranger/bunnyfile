@@ -672,7 +672,7 @@ function FilesPage() {
             !allModePrompt &&
             list.data && (
               <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                {list.data.total} total
+                {list.data.total} items
                 {folderFilter ? ` · ${entries.length} shown` : ''}
               </p>
             )
