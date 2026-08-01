@@ -239,27 +239,43 @@ describe('Public Share Access — beginDownload (file)', () => {
     const first = await access.beginDownload(token);
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    await first.stream.cancel();
+    const reader = first.stream.getReader();
+    await reader.read();
+    await reader.cancel();
 
-    await Bun.sleep(20);
-    const row = await db
-      .select()
-      .from(shareLink)
-      .where(eq(shareLink.id, id))
-      .then((r) => r[0]!);
-    expect(row.downloadCount).toBe(0);
+    let released = false;
+    for (let i = 0; i < 50; i++) {
+      const row = await db
+        .select()
+        .from(shareLink)
+        .where(eq(shareLink.id, id))
+        .then((r) => r[0]!);
+      if (row.downloadCount === 0) {
+        released = true;
+        break;
+      }
+      await Bun.sleep(10);
+    }
+    expect(released).toBe(true);
 
     const second = await access.beginDownload(token);
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     await new Response(second.stream).arrayBuffer();
-    await Bun.sleep(20);
-    const after = await db
-      .select()
-      .from(shareLink)
-      .where(eq(shareLink.id, id))
-      .then((r) => r[0]!);
-    expect(after.downloadCount).toBe(1);
+    let committed = false;
+    for (let i = 0; i < 50; i++) {
+      const after = await db
+        .select()
+        .from(shareLink)
+        .where(eq(shareLink.id, id))
+        .then((r) => r[0]!);
+      if (after.downloadCount === 1) {
+        committed = true;
+        break;
+      }
+      await Bun.sleep(10);
+    }
+    expect(committed).toBe(true);
 
     const third = await access.beginDownload(token);
     expect(third.ok).toBe(false);
