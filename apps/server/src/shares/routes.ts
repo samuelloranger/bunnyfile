@@ -5,8 +5,9 @@ import { auth } from '../auth/auth';
 import { db } from '../db';
 import { fileIndex, type ShareLinkRow, shareLink } from '../db/schema';
 import { mimeFromName } from '../files/mime';
-import { basenameOf, safeRelPath } from '../files/paths';
+import { basenameOf } from '../files/paths';
 import { SAFE_CONTENT_HEADERS } from '../files/routes';
+import { userRel } from '../files/user-path';
 import {
   absFromRelOrThrow,
   createFileStream,
@@ -166,7 +167,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
         set.status = 401;
         return { error: 'unauthorized' as const };
       }
-      const path = safeRelPath(body.path);
+      const path = userRel(body.path);
       if (!path) {
         set.status = 400;
         return { error: 'invalid path' as const };

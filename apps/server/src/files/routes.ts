@@ -6,7 +6,7 @@ import { db } from '../db';
 import { fileIndex, thumbnail, trashItem } from '../db/schema';
 import { addSseClient, broadcastFilesChanged, removeSseClient } from './events';
 import { mimeFromName } from './mime';
-import { basenameOf, safeRelPath } from './paths';
+import { basenameOf } from './paths';
 import { scan } from './scanner';
 import { deleteFileSearch, deleteFileSearchPrefix, searchFiles, upsertFileSearch } from './search';
 import {
@@ -25,6 +25,7 @@ import {
   writeUpload,
 } from './store';
 import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
+import { RESERVED_TOP_SEGMENTS, userRel } from './user-path';
 import { createFolderZipStream } from './zip';
 
 // Stored-XSS neutralizer for user-controlled bytes: `sandbox` stops any script
@@ -35,20 +36,6 @@ export const SAFE_CONTENT_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Content-Security-Policy': 'sandbox',
 } as const;
-
-// Internal storage areas the user-facing files API must never touch: the S3
-// object tree, trash, and multipart scratch. (The S3 API addresses `s3/...`
-// through its own resolver; the web file API must not.)
-const RESERVED_TOP_SEGMENTS = new Set(['s3', '.trash', '.multipart', '.shares']);
-
-/** Validate a user-supplied path AND reject reserved internal prefixes. */
-function userRel(raw: string | null | undefined): string | null {
-  const rel = safeRelPath(raw);
-  if (rel == null) return null;
-  const top = rel.split('/')[0];
-  if (top && RESERVED_TOP_SEGMENTS.has(top)) return null;
-  return rel;
-}
 
 type FileEntry = {
   kind: 'file';
