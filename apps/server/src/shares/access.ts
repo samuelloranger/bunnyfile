@@ -135,7 +135,7 @@ export async function inspect(token: string): Promise<InspectResult> {
   }
 
   const meta = await buildUnlockedPublicMeta(row);
-  return { status: 'unlocked', requiresPassword: false, ...meta };
+  return { status: 'unlocked', ...meta, requiresPassword: false };
 }
 
 export type VerifyResult =

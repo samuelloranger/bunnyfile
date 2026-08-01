@@ -223,7 +223,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
         set.status = 410;
         return { error: result.message };
       }
-      return { ok: true as const, ...result };
+      return result;
     },
     {
       body: t.Object({
