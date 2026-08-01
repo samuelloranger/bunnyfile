@@ -13,7 +13,8 @@
       "!**/build",
       "!**/.tanstack",
       "!**/routeTree.gen.ts",
-      "!**/data"
+      "!**/data",
+      "!**/.tether-preview"
     ]
   },
   "formatter": {

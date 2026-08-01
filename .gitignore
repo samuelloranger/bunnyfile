@@ -39,3 +39,4 @@ apps/server/test.txt
 
 # CodeGraph index (local only)
 .codegraph/
+.tether-preview/

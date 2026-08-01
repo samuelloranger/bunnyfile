@@ -23,7 +23,7 @@ const [
   { db },
   { fileIndex, user },
   { sharesRoutes },
-  { writeUpload, absFromRelOrThrow, SHARES_ROOT },
+  { writeUpload, SHARES_ROOT },
 ] = await Promise.all([
   import('../db/migrate'),
   import('../db'),

@@ -5,7 +5,7 @@ import { Elysia } from 'elysia';
 import { db } from '../db';
 import { shareLink } from '../db/schema';
 import { logScanReport, scan } from './scanner';
-import { SHARES_ROOT, removeShareZip } from './store';
+import { removeShareZip, SHARES_ROOT } from './store';
 
 /**
  * Delete cached folder-share zips whose share is gone, revoked, expired, or

@@ -7,7 +7,6 @@ import { fileIndex, type ShareLinkRow, shareLink } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
 import { SAFE_CONTENT_HEADERS } from '../files/routes';
-import { userRel } from '../files/user-path';
 import {
   absFromRelOrThrow,
   createFileStream,
@@ -15,8 +14,9 @@ import {
   PathError,
   removeShareZip,
 } from '../files/store';
-import { buildShareZip, ensureShareZip } from './folder-zip';
+import { userRel } from '../files/user-path';
 import { attachDownloadLease } from './download-lease';
+import { buildShareZip, ensureShareZip } from './folder-zip';
 import { allowShareRequest, requestIp } from './rate-limit';
 
 function randomToken() {
