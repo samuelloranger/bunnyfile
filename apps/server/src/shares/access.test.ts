@@ -1,0 +1,132 @@
+import { beforeAll, describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const testRoot = await mkdtemp(join(tmpdir(), 'bunnyfile-share-access-'));
+process.env.DB_PATH = join(testRoot, 'test.sqlite');
+process.env.DATA_DIR = join(testRoot, 'data');
+process.env.BETTER_AUTH_SECRET = 'test-secret';
+
+const [{ runMigrations }, { db }, { fileIndex, shareLink, user }, { writeUpload }, access] =
+  await Promise.all([
+    import('../db/migrate'),
+    import('../db'),
+    import('../db/schema'),
+    import('../files/store'),
+    import('./access'),
+  ]);
+
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(c) {
+      c.enqueue(new TextEncoder().encode(text));
+      c.close();
+    },
+  });
+}
+
+describe('Public Share Access — inspect', () => {
+  beforeAll(async () => {
+    await mkdir(process.env.DATA_DIR!, { recursive: true });
+    runMigrations();
+    await db.insert(user).values({
+      id: 'access-user',
+      name: 'Access User',
+      email: 'access@example.com',
+      emailVerified: true,
+      role: 'admin',
+    });
+    const info = await writeUpload('hello.txt', streamFromText('hello world'));
+    await db.insert(fileIndex).values({
+      path: 'hello.txt',
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      inode: info.inode,
+      sha256: info.sha256,
+      mime: 'text/plain',
+      uploadedByUserId: 'access-user',
+    });
+  });
+
+  test('not_found for unknown token', async () => {
+    const r = await access.inspect('missing-token');
+    expect(r.status).toBe('unavailable');
+    if (r.status === 'unavailable') expect(r.reason).toBe('not_found');
+  });
+
+  test('locked omits path/name/size/mime', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      passwordHash: await Bun.password.hash('secret'),
+      createdByUserId: 'access-user',
+    });
+    const r = await access.inspect(token);
+    expect(r.status).toBe('locked');
+    if (r.status === 'locked') {
+      expect(r.requiresPassword).toBe(true);
+      expect('path' in r).toBe(false);
+      expect('name' in r).toBe(false);
+      expect('size' in r).toBe(false);
+      expect('mime' in r).toBe(false);
+    }
+  });
+
+  test('unlocked open share returns file meta', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      createdByUserId: 'access-user',
+    });
+    const r = await access.inspect(token);
+    expect(r.status).toBe('unlocked');
+    if (r.status === 'unlocked') {
+      expect(r.name).toBe('hello.txt');
+      expect(r.size).toBeGreaterThan(0);
+      expect(r.mime).toBe('text/plain');
+      expect(r.requiresPassword).toBe(false);
+    }
+  });
+
+  test('expired / revoked / max_downloads are unavailable', async () => {
+    const expiredToken = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token: expiredToken,
+      path: 'hello.txt',
+      expiresAt: new Date(Date.now() - 60_000),
+      createdByUserId: 'access-user',
+    });
+    expect((await access.inspect(expiredToken)).status).toBe('unavailable');
+
+    const revokedToken = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token: revokedToken,
+      path: 'hello.txt',
+      revokedAt: new Date(),
+      createdByUserId: 'access-user',
+    });
+    const revoked = await access.inspect(revokedToken);
+    expect(revoked.status).toBe('unavailable');
+    if (revoked.status === 'unavailable') expect(revoked.reason).toBe('revoked');
+
+    const maxedToken = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token: maxedToken,
+      path: 'hello.txt',
+      maxDownloads: 1,
+      downloadCount: 1,
+      createdByUserId: 'access-user',
+    });
+    const maxed = await access.inspect(maxedToken);
+    expect(maxed.status).toBe('unavailable');
+    if (maxed.status === 'unavailable') expect(maxed.reason).toBe('max_downloads');
+  });
+});
