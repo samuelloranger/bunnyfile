@@ -16,6 +16,7 @@ import {
   removeShareZip,
 } from '../files/store';
 import { buildShareZip, ensureShareZip } from './folder-zip';
+import { attachDownloadLease } from './download-lease';
 import { allowShareRequest, requestIp } from './rate-limit';
 
 function randomToken() {
@@ -171,17 +172,33 @@ async function downloadHandler({
         set.status = 410;
         return { error: statusToMessage('max_downloads') };
       }
-    } else {
-      await db
-        .update(shareLink)
-        .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
-        .where(eq(shareLink.id, row.id));
     }
 
     // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
     const headerName = downloadName.replace(/[\x00-\x1f\x7f]/g, '_');
     const quoted = headerName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    return new Response(createFileStream(fileAbs), {
+
+    const leased = row.maxDownloads != null;
+    const stream = attachDownloadLease(createFileStream(fileAbs), {
+      onComplete: async () => {
+        if (!leased) {
+          await db
+            .update(shareLink)
+            .set({ downloadCount: sql`${shareLink.downloadCount} + 1` })
+            .where(eq(shareLink.id, row.id));
+        }
+      },
+      onCancel: async () => {
+        if (leased) {
+          await db
+            .update(shareLink)
+            .set({ downloadCount: sql`max(${shareLink.downloadCount} - 1, 0)` })
+            .where(eq(shareLink.id, row.id));
+        }
+      },
+    });
+
+    return new Response(stream, {
       headers: {
         ...SAFE_CONTENT_HEADERS,
         'Content-Type': mime,
