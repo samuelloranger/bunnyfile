@@ -284,3 +284,65 @@ describe('Public Share Access — beginDownload (file)', () => {
     }
   });
 });
+
+describe('Public Share Access — folder artifact', () => {
+  test('prepare → beginDownload returns zip with entries; mutate → rebuild; invalidate removes', async () => {
+    const folder = `fa-${crypto.randomUUID()}`;
+    const info = await writeUpload(`${folder}/a.txt`, streamFromText('hi'));
+    await db.insert(fileIndex).values({
+      path: `${folder}/a.txt`,
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      inode: info.inode,
+      sha256: info.sha256,
+      mime: 'text/plain',
+      uploadedByUserId: 'access-user',
+    });
+
+    const id = crypto.randomUUID();
+    const token = crypto.randomUUID();
+    await access.prepareFolderArtifact(id, folder);
+    await db.insert(shareLink).values({
+      id,
+      token,
+      path: folder,
+      createdByUserId: 'access-user',
+    });
+
+    const meta = await access.inspect(token);
+    expect(meta.status).toBe('unlocked');
+    if (meta.status === 'unlocked') {
+      expect(meta.mime).toBe('application/zip');
+      expect(meta.name).toBe(`${folder}.zip`);
+      expect(meta.size).toBeGreaterThan(0);
+    }
+
+    const dl = await access.beginDownload(token);
+    expect(dl.ok).toBe(true);
+    if (!dl.ok) return;
+    const { unzipSync } = await import('fflate');
+    const files = unzipSync(new Uint8Array(await new Response(dl.stream).arrayBuffer()));
+    expect(new TextDecoder().decode(files['a.txt'])).toBe('hi');
+
+    const info2 = await writeUpload(`${folder}/b.txt`, streamFromText('bye'));
+    await db.insert(fileIndex).values({
+      path: `${folder}/b.txt`,
+      size: info2.size,
+      mtimeMs: info2.mtimeMs,
+      inode: info2.inode,
+      sha256: info2.sha256,
+      mime: 'text/plain',
+      uploadedByUserId: 'access-user',
+    });
+    const dl2 = await access.beginDownload(token);
+    expect(dl2.ok).toBe(true);
+    if (!dl2.ok) return;
+    const files2 = unzipSync(new Uint8Array(await new Response(dl2.stream).arrayBuffer()));
+    expect(Object.keys(files2).sort()).toEqual(['a.txt', 'b.txt']);
+
+    await access.invalidateFolderArtifact(id);
+    const { SHARES_ROOT } = await import('../files/store');
+    const { stat } = await import('node:fs/promises');
+    await expect(stat(join(SHARES_ROOT, id))).rejects.toThrow();
+  });
+});

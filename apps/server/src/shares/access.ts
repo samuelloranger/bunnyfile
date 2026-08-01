@@ -5,9 +5,15 @@ import { fileIndex, type ShareLinkRow, shareLink } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
 import { SAFE_CONTENT_HEADERS } from '../files/routes';
-import { absFromRelOrThrow, createFileStream, openStream, PathError } from '../files/store';
+import {
+  absFromRelOrThrow,
+  createFileStream,
+  openStream,
+  PathError,
+  removeShareZip,
+} from '../files/store';
 import { attachDownloadLease } from './download-lease';
-import { ensureShareZip } from './folder-zip';
+import { buildShareZip, ensureShareZip } from './folder-zip';
 
 export type ShareUnavailableReason = 'not_found' | 'expired' | 'revoked' | 'max_downloads';
 
@@ -291,4 +297,14 @@ export async function beginDownload(
     }
     throw err;
   }
+}
+
+/** Materialize/refresh cached zip for a folder share (used on create). */
+export async function prepareFolderArtifact(shareId: string, folderRel: string): Promise<void> {
+  await buildShareZip(shareId, folderRel);
+}
+
+/** Delete cached zip dir for a share id (used on revoke). */
+export async function invalidateFolderArtifact(shareId: string): Promise<void> {
+  await removeShareZip(shareId);
 }

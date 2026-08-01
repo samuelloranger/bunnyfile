@@ -1,3 +1,7 @@
+/**
+ * @internal Access-only — folder-share zip cache policy.
+ * Callers must go through Public Share Access (`./access`), not this module.
+ */
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
