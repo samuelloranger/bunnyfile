@@ -80,6 +80,46 @@ describe('shares routes', () => {
     }
   });
 
+  it('omits path/name/size/mime on locked public metadata', async () => {
+    const createRes = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        path: 'hello.txt',
+        password: 'secret123',
+        maxDownloads: 3,
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const created = (await createRes.json()) as { token: string };
+
+    const pageRes = await request(`/api/shares/public/${created.token}`);
+    expect(pageRes.status).toBe(200);
+    const page = (await pageRes.json()) as Record<string, unknown>;
+    expect(page.status).toBe('ok');
+    expect(page.requiresPassword).toBe(true);
+    expect(page.maxDownloads).toBe(3);
+    expect(page.downloadCount).toBe(0);
+    expect(page.path).toBeUndefined();
+    expect(page.name).toBeUndefined();
+    expect(page.size).toBeUndefined();
+    expect(page.mime).toBeUndefined();
+  });
+
+  it('rejects password supplied only as GET query on /file', async () => {
+    const createRes = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'hello.txt', password: 'secret123' }),
+    });
+    expect(createRes.status).toBe(200);
+    const { token } = (await createRes.json()) as { token: string };
+    const res = await request(
+      `/api/shares/public/${token}/file?password=${encodeURIComponent('secret123')}`,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('creates share, validates password, and enforces max downloads', async () => {
     const createRes = await request('/api/shares', {
       method: 'POST',
@@ -99,9 +139,16 @@ describe('shares routes', () => {
 
     const pageRes = await request(`/api/shares/public/${created.token}`);
     expect(pageRes.status).toBe(200);
-    const page = (await pageRes.json()) as { status: string; requiresPassword: boolean };
+    const page = (await pageRes.json()) as {
+      status: string;
+      requiresPassword: boolean;
+      path?: string;
+      name?: string;
+    };
     expect(page.status).toBe('ok');
     expect(page.requiresPassword).toBeTrue();
+    expect(page.path).toBeUndefined();
+    expect(page.name).toBeUndefined();
 
     const noPasswordRes = await request(`/api/shares/public/${created.token}/file`, {
       method: 'POST',

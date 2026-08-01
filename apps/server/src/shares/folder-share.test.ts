@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, mock } from 'bun:test';
-import { mkdir, mkdtemp, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Elysia } from 'elysia';
@@ -121,5 +121,41 @@ describe('folder shares', () => {
       body: JSON.stringify({ path: `nope-${crypto.randomUUID()}` }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it('locked folder metadata skips ensureShareZip', async () => {
+    const folder = `secret-docs-${crypto.randomUUID()}`;
+    const info = await writeUpload(`${folder}/a.txt`, streamFromText('hi'));
+    await db.insert(fileIndex).values({
+      path: `${folder}/a.txt`,
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      inode: info.inode,
+      sha256: info.sha256,
+      mime: 'text/plain',
+      uploadedByUserId: 'folder-share-user',
+    });
+
+    const createRes = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: folder, password: 'folder-secret' }),
+    });
+    expect(createRes.status).toBe(200);
+    const created = (await createRes.json()) as { id: string; token: string };
+
+    // Create materializes a zip; remove it so we can prove metadata GET does not rebuild.
+    await rm(absFromRelOrThrow(`.shares/${created.id}`), { recursive: true, force: true });
+
+    const metaRes = await request(`/api/shares/public/${created.token}`);
+    expect(metaRes.status).toBe(200);
+    const meta = (await metaRes.json()) as Record<string, unknown>;
+    expect(meta.requiresPassword).toBe(true);
+    expect(meta.path).toBeUndefined();
+    expect(meta.name).toBeUndefined();
+    expect(meta.size).toBeUndefined();
+    expect(meta.mime).toBeUndefined();
+
+    await expect(stat(absFromRelOrThrow(`.shares/${created.id}`))).rejects.toThrow();
   });
 });

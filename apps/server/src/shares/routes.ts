@@ -59,7 +59,6 @@ async function downloadHandler({
   request,
   params,
   body,
-  query,
   set,
   server,
   // biome-ignore lint/suspicious/noExplicitAny: Elysia handler context is complex to type statically
@@ -77,7 +76,7 @@ async function downloadHandler({
   }
 
   const row = state.row;
-  const password = body?.password ?? query?.password;
+  const password = body?.password;
   if (row.passwordHash) {
     if (!password || !(await Bun.password.verify(password, row.passwordHash))) {
       set.status = 401;
@@ -288,6 +287,17 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       return { status: state.status, message: statusToMessage(state.status) };
     }
 
+    const requiresPassword = Boolean(state.row.passwordHash);
+    if (requiresPassword) {
+      return {
+        status: 'ok' as const,
+        requiresPassword: true as const,
+        expiresAt: state.row.expiresAt,
+        maxDownloads: state.row.maxDownloads,
+        downloadCount: state.row.downloadCount,
+      };
+    }
+
     let isDir = false;
     try {
       isDir = (await stat(absFromRelOrThrow(state.row.path))).isDirectory();
@@ -303,7 +313,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
         name: `${basenameOf(state.row.path)}.zip`,
         size,
         mime: 'application/zip',
-        requiresPassword: Boolean(state.row.passwordHash),
+        requiresPassword: false as const,
         expiresAt: state.row.expiresAt,
         maxDownloads: state.row.maxDownloads,
         downloadCount: state.row.downloadCount,
@@ -323,7 +333,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
       name: basenameOf(state.row.path),
       size: indexRow?.size ?? null,
       mime: indexRow?.mime ?? mimeFromName(basenameOf(state.row.path)),
-      requiresPassword: Boolean(state.row.passwordHash),
+      requiresPassword: false as const,
       expiresAt: state.row.expiresAt,
       maxDownloads: state.row.maxDownloads,
       downloadCount: state.row.downloadCount,
@@ -367,11 +377,7 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
     },
   )
 
-  .get('/api/shares/public/:token/file', downloadHandler, {
-    query: t.Object({
-      password: t.Optional(t.String()),
-    }),
-  })
+  .get('/api/shares/public/:token/file', downloadHandler)
 
   .post('/api/shares/public/:token/file', downloadHandler, {
     body: t.Object({
