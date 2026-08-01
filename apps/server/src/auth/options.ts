@@ -6,11 +6,19 @@ import { account, session, user, verification } from '../db/schema';
 import { sendMail } from '../email/mailer';
 import { explicitTrustedOrigins, isTrustedOrigin } from './origins';
 
-const DEV_SECRET = 'dev-only-insecure-secret-please-change-me';
-const secret = Bun.env.BETTER_AUTH_SECRET ?? DEV_SECRET;
-if (secret === DEV_SECRET) {
-  console.warn('[auth] BETTER_AUTH_SECRET is not set — using an insecure dev default');
+const INSECURE_DEFAULT = 'dev-only-insecure-secret-please-change-me';
+
+/** Refuse missing or known-insecure secrets. Exported for unit tests. */
+export function assertAuthSecret(secret: string | undefined): asserts secret is string {
+  if (!secret || secret === INSECURE_DEFAULT) {
+    throw new Error(
+      'BETTER_AUTH_SECRET is required (set a random ≥32-byte value). Refusing to start with a missing or insecure default.',
+    );
+  }
 }
+
+assertAuthSecret(Bun.env.BETTER_AUTH_SECRET);
+const secret = Bun.env.BETTER_AUTH_SECRET;
 
 const baseURL = Bun.env.BETTER_AUTH_URL ?? 'http://localhost:3901';
 const webOrigin = Bun.env.WEB_ORIGIN ?? 'http://localhost:3900';

@@ -24,7 +24,7 @@ Stop Nextcloud writes, then copy your data directory to BunnyFile's `DATA_DIR`:
 rsync -aH --info=progress2 /var/www/nextcloud/data/admin/files/ /opt/bunnyfile/data/files/
 ```
 
-BunnyFile uses a flat filesystem layout (no per-user `files/` subdirs unless you create them). If you had multiple Nextcloud users, pick a folder layout that makes sense for your household — e.g. `alice/`, `bob/` top-level directories.
+BunnyFile uses a flat filesystem layout (no per-user ACL). If you had multiple Nextcloud users, pick a folder layout that makes sense for your household — e.g. `alice/`, `bob/` top-level directories. **Those folders are a convention only:** every authenticated BunnyFile user can still see and delete the whole tree, and any valid S3 access key reaches every bucket.
 
 ### 2. Start BunnyFile and rescan
 
