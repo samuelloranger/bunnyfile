@@ -106,6 +106,33 @@ describe('storage-root protection', () => {
   });
 });
 
+describe('createFileStream', () => {
+  it('cancel closes the file handle and a later full read still works', async () => {
+    const rel = `stream-${crypto.randomUUID().slice(0, 8)}.bin`;
+    const bytes = new Uint8Array(1024 * 512).fill(7);
+    await writeUpload(rel, streamFromBytes(bytes));
+    const { absFromRelOrThrow, createFileStream } = await import('./store');
+    const abs = absFromRelOrThrow(rel);
+
+    const stream = createFileStream(abs, 64 * 1024);
+    const reader = stream.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await reader.cancel();
+
+    const again = createFileStream(abs, 64 * 1024);
+    const chunks: Uint8Array[] = [];
+    const r2 = again.getReader();
+    for (;;) {
+      const { done, value } = await r2.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    expect(total).toBe(bytes.length);
+  });
+});
+
 describe('removeShareZip', () => {
   it('removes .shares/<id> and is a no-op when absent', async () => {
     const { removeShareZip, absFromRelOrThrow, DATA_ROOT } = await import('./store');

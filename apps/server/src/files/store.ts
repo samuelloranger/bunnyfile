@@ -346,10 +346,15 @@ export function createFileStream(path: string, chunkSize = 256 * 1024): Readable
       fd = await open(path, 'r');
     },
     async pull(controller) {
+      if (!fd) {
+        controller.close();
+        return;
+      }
       const buffer = new Uint8Array(chunkSize);
-      const { bytesRead } = await fd!.read(buffer, 0, chunkSize, null);
+      const { bytesRead } = await fd.read(buffer, 0, chunkSize, null);
       if (bytesRead === 0) {
-        await fd!.close();
+        await fd.close();
+        fd = null;
         controller.close();
       } else {
         controller.enqueue(buffer.subarray(0, bytesRead));
@@ -358,6 +363,7 @@ export function createFileStream(path: string, chunkSize = 256 * 1024): Readable
     async cancel() {
       if (fd) {
         await fd.close();
+        fd = null;
       }
     },
   });
