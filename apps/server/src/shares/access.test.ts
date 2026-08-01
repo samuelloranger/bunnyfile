@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 
 const testRoot = await mkdtemp(join(tmpdir(), 'bunnyfile-share-access-'));
 process.env.DB_PATH = join(testRoot, 'test.sqlite');
@@ -189,5 +190,81 @@ describe('Public Share Access — verify', () => {
     const r = await access.verify(token, 'secret');
     expect(r.ok).toBe(false);
     if (!r.ok && r.error === 'unavailable') expect(r.reason).toBe('revoked');
+  });
+});
+
+describe('Public Share Access — beginDownload (file)', () => {
+  test('downloads open file bytes', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      createdByUserId: 'access-user',
+    });
+    const r = await access.beginDownload(token);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.headers['Content-Type']).toBe('text/plain');
+    const text = await new Response(r.stream).text();
+    expect(text).toBe('hello world');
+  });
+
+  test('wrong password → unauthorized', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      passwordHash: await Bun.password.hash('secret'),
+      createdByUserId: 'access-user',
+    });
+    const r = await access.beginDownload(token, 'wrong');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe('unauthorized');
+  });
+
+  test('max downloads: cancel releases lease', async () => {
+    const token = crypto.randomUUID();
+    const id = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id,
+      token,
+      path: 'hello.txt',
+      maxDownloads: 1,
+      downloadCount: 0,
+      createdByUserId: 'access-user',
+    });
+
+    const first = await access.beginDownload(token);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await first.stream.cancel();
+
+    await Bun.sleep(20);
+    const row = await db
+      .select()
+      .from(shareLink)
+      .where(eq(shareLink.id, id))
+      .then((r) => r[0]!);
+    expect(row.downloadCount).toBe(0);
+
+    const second = await access.beginDownload(token);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    await new Response(second.stream).arrayBuffer();
+    await Bun.sleep(20);
+    const after = await db
+      .select()
+      .from(shareLink)
+      .where(eq(shareLink.id, id))
+      .then((r) => r[0]!);
+    expect(after.downloadCount).toBe(1);
+
+    const third = await access.beginDownload(token);
+    expect(third.ok).toBe(false);
+    if (!third.ok && third.error === 'unavailable') {
+      expect(third.reason).toBe('max_downloads');
+    }
   });
 });
