@@ -134,16 +134,16 @@ describe('createFileStream', () => {
 });
 
 describe('removeShareZip', () => {
-  it('removes .shares/<id> and is a no-op when absent', async () => {
-    const { removeShareZip, absFromRelOrThrow, DATA_ROOT } = await import('./store');
+  it('removes shares/<id> and is a no-op when absent', async () => {
+    const { removeShareZip, SHARES_ROOT } = await import('./store');
     const id = crypto.randomUUID();
-    const dir = absFromRelOrThrow(`.shares/${id}`);
+    const dir = join(SHARES_ROOT, id);
     await mkdir(dir, { recursive: true });
-    await writeFile(absFromRelOrThrow(`.shares/${id}/x.zip`), 'z');
+    await writeFile(join(dir, 'x.zip'), 'z');
     await removeShareZip(id); // removes it
     await expect(stat(dir)).rejects.toThrow();
     await removeShareZip(id); // no throw second time
-    expect(DATA_ROOT).toBeTruthy();
+    expect(SHARES_ROOT).toBeTruthy();
   });
 });
 

@@ -67,17 +67,15 @@ describe('shares routes', () => {
     });
   });
 
-  it('rejects share create on reserved top segments', async () => {
-    for (const path of ['s3', 's3/bucket/key', '.trash', '.multipart', '.shares']) {
-      const res = await request('/api/shares', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toBe('invalid path');
-    }
+  it('rejects share create on path traversal', async () => {
+    const res = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: '../outside' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('invalid path');
   });
 
   it('omits path/name/size/mime on locked public metadata', async () => {

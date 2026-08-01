@@ -1,13 +1,9 @@
 import { safeRelPath } from './paths';
 
-/** Internal storage areas the user-facing files/shares APIs must never touch. */
-export const RESERVED_TOP_SEGMENTS = new Set(['s3', '.trash', '.multipart', '.shares']);
-
-/** Validate a user-supplied path AND reject reserved internal prefixes. */
+/**
+ * Validate a user-supplied path for the files/shares APIs.
+ * After the v2 layout split, isolation is by FILES_ROOT — no denylist needed.
+ */
 export function userRel(raw: string | null | undefined): string | null {
-  const rel = safeRelPath(raw);
-  if (rel == null) return null;
-  const top = rel.split('/')[0];
-  if (top && RESERVED_TOP_SEGMENTS.has(top)) return null;
-  return rel;
+  return safeRelPath(raw);
 }

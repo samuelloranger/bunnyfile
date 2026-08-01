@@ -61,10 +61,11 @@ const tree: Record<string, string> = {
 };
 
 await rm(DATA_DIR, { recursive: true, force: true });
+const filesRoot = join(DATA_DIR, 'files');
 for (const [rel, content] of Object.entries(tree)) {
-  const full = join(DATA_DIR, rel);
+  const full = join(filesRoot, rel);
   await mkdir(join(full, '..'), { recursive: true });
   await writeFile(full, content);
 }
 
-console.log(`[seed] wrote ${Object.keys(tree).length} files into ${DATA_DIR}`);
+console.log(`[seed] wrote ${Object.keys(tree).length} files into ${filesRoot}`);

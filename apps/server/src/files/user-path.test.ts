@@ -2,16 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { userRel } from './user-path';
 
 describe('userRel', () => {
-  test('allows normal paths', () => {
+  test('allows normal paths including former reserved names under files/', () => {
     expect(userRel('docs/a.txt')).toBe('docs/a.txt');
     expect(userRel('')).toBe('');
-  });
-
-  test('rejects reserved top segments', () => {
-    for (const top of ['s3', '.trash', '.multipart', '.shares']) {
-      expect(userRel(top)).toBeNull();
-      expect(userRel(`${top}/x`)).toBeNull();
-    }
+    expect(userRel('s3')).toBe('s3');
+    expect(userRel('s3/x')).toBe('s3/x');
   });
 
   test('rejects traversal via safeRelPath', () => {

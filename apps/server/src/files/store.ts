@@ -3,14 +3,20 @@ import { createReadStream } from 'node:fs';
 import { type FileHandle, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { trackUpload } from '../inflight';
+import { ensureDataLayout } from './layout';
 import { resolveInRoot, safeRelPath } from './paths';
 
 const DEFAULT_ROOT = resolve(import.meta.dir, '../../data/files');
+/** Container root (`DATA_DIR`): files/, s3/, trash/, shares/, multipart/. */
 export const DATA_ROOT = Bun.env.DATA_DIR ? resolve(Bun.env.DATA_DIR) : DEFAULT_ROOT;
+/** User-browsable files tree. */
+export const FILES_ROOT = join(DATA_ROOT, 'files');
+export const TRASH_ROOT = join(DATA_ROOT, 'trash');
+export const SHARES_ROOT = join(DATA_ROOT, 'shares');
+export const MULTIPART_ROOT = join(DATA_ROOT, 'multipart');
+export const S3_ROOT = join(DATA_ROOT, 's3');
 
-// Make sure the data root exists at boot; creating it lazily would race with
-// the first scan / upload.
-await mkdir(DATA_ROOT, { recursive: true });
+await ensureDataLayout(DATA_ROOT);
 
 export class PathError extends Error {
   constructor(
@@ -21,8 +27,17 @@ export class PathError extends Error {
   }
 }
 
+/**
+ * Resolve a relative path for user files (under FILES_ROOT) or S3 objects
+ * (`s3/...` under DATA_ROOT). Trash/shares use dedicated helpers.
+ */
 function abs(rel: string): string {
-  const p = resolveInRoot(DATA_ROOT, rel);
+  if (rel === 's3' || rel.startsWith('s3/')) {
+    const p = resolveInRoot(DATA_ROOT, rel);
+    if (p == null) throw new PathError('traversal', `unsafe path: ${rel}`);
+    return p;
+  }
+  const p = resolveInRoot(FILES_ROOT, rel);
   if (p == null) throw new PathError('traversal', `unsafe path: ${rel}`);
   return p;
 }
@@ -34,8 +49,23 @@ export function absFromRelOrThrow(raw: string): string {
   return abs(rel);
 }
 
+function trashAbs(trashRel: string): string {
+  const rel = safeRelPath(trashRel);
+  if (rel == null) throw new PathError('traversal', `invalid trash path: ${trashRel}`);
+  let under: string;
+  if (rel.startsWith('.trash/')) under = rel.slice('.trash/'.length);
+  else if (rel.startsWith('trash/')) under = rel.slice('trash/'.length);
+  else throw new PathError('traversal', `not a trash path: ${trashRel}`);
+  if (!under || under.split('/').some((s) => s === '..' || s === '')) {
+    throw new PathError('traversal', `invalid trash path: ${trashRel}`);
+  }
+  const p = resolveInRoot(TRASH_ROOT, under);
+  if (p == null) throw new PathError('traversal', `unsafe trash path: ${trashRel}`);
+  return p;
+}
+
 // Inputs like "" / "." / "/" normalize to the empty rel, which resolves to the
-// data root itself. Destructive ops must refuse it, or a request with path="."
+// files root itself. Destructive ops must refuse it, or a request with path="."
 // would delete/move/trash the entire storage tree.
 function assertNotRoot(rel: string): void {
   if (safeRelPath(rel) === '') {
@@ -203,7 +233,12 @@ export async function movePathToTrash(
   mtimeMs: number;
   inode: number;
 }> {
-  if (rel === '.trash' || rel.startsWith('.trash/')) {
+  if (
+    rel === 'trash' ||
+    rel.startsWith('trash/') ||
+    rel === '.trash' ||
+    rel.startsWith('.trash/')
+  ) {
     throw new PathError('traversal', 'trash paths cannot be trashed');
   }
   assertNotRoot(rel);
@@ -217,8 +252,8 @@ export async function movePathToTrash(
   }
 
   const name = rel.split('/').at(-1) ?? id;
-  const trashPath = `.trash/${id}/${name}`;
-  const to = absFromRelOrThrow(trashPath);
+  const trashPath = `trash/${id}/${name}`;
+  const to = trashAbs(trashPath);
   await mkdir(dirname(to), { recursive: true });
   await rename(from, to);
 
@@ -232,7 +267,7 @@ export async function movePathToTrash(
 }
 
 export async function restorePathFromTrash(trashRel: string, originalRel: string): Promise<void> {
-  const from = absFromRelOrThrow(trashRel);
+  const from = trashAbs(trashRel);
   const to = absFromRelOrThrow(originalRel);
 
   try {
@@ -256,13 +291,13 @@ export async function restorePathFromTrash(trashRel: string, originalRel: string
 }
 
 export async function removeTrashPath(trashRel: string): Promise<void> {
-  const path = absFromRelOrThrow(trashRel);
+  const path = trashAbs(trashRel);
   await rm(path, { recursive: true, force: true });
 }
 
 /** Delete a folder-share's cached zip directory. No-op if it doesn't exist. */
 export async function removeShareZip(id: string): Promise<void> {
-  await rm(absFromRelOrThrow(`.shares/${id}`), { recursive: true, force: true });
+  await rm(join(SHARES_ROOT, id), { recursive: true, force: true });
 }
 
 export async function moveFile(fromRel: string, toRel: string): Promise<void> {
@@ -309,7 +344,7 @@ export async function createFolder(rel: string): Promise<void> {
 }
 
 export async function listImmediateDirectories(relPrefix: string): Promise<string[]> {
-  const dir = relPrefix ? absFromRelOrThrow(relPrefix) : DATA_ROOT;
+  const dir = relPrefix ? absFromRelOrThrow(relPrefix) : FILES_ROOT;
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     return entries

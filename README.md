@@ -80,6 +80,7 @@ Designed to be safe behind a reverse proxy. What's in the box:
 - Behind Caddy (or any reverse proxy), set `TRUST_PROXY=1` so share rate limits use the real client IP from `X-Forwarded-For`. Optionally set `TRUSTED_PROXIES` to a comma-separated IPv4/CIDR allowlist of proxy peers (e.g. `10.0.0.0/8`); without it, any peer is trusted when `TRUST_PROXY` is on.
 - Restrict cross-origin access with `WEB_ORIGIN` when serving from a custom domain.
 - Do not plant symlinks under `DATA_DIR` that point outside the volume — path checks use `resolve()`, not `realpath()`.
+- Back up `DATA_DIR` before upgrading across the v2 layout change (first boot moves user files into `DATA_DIR/files/` and renames `.trash`/`.shares`/`.multipart`). See [`docs/s3-compatibility.md`](./docs/s3-compatibility.md#storage-model).
 
 **S3 signing note:** mutating requests may use `x-amz-content-sha256: UNSIGNED-PAYLOAD` (rclone/aws-cli streaming). Payload-hash binding for that case is deferred so known clients keep working; prefer clients that send a real payload hash when practical.
 

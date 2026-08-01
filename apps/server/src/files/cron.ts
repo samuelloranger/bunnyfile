@@ -5,7 +5,7 @@ import { Elysia } from 'elysia';
 import { db } from '../db';
 import { shareLink } from '../db/schema';
 import { logScanReport, scan } from './scanner';
-import { DATA_ROOT, removeShareZip } from './store';
+import { SHARES_ROOT, removeShareZip } from './store';
 
 /**
  * Delete cached folder-share zips whose share is gone, revoked, expired, or
@@ -15,10 +15,10 @@ import { DATA_ROOT, removeShareZip } from './store';
 export async function sweepShareZips(): Promise<void> {
   let ids: string[];
   try {
-    const entries = await readdir(`${DATA_ROOT}/.shares`, { withFileTypes: true });
+    const entries = await readdir(SHARES_ROOT, { withFileTypes: true });
     ids = entries.filter((e) => e.isDirectory()).map((e) => e.name);
   } catch {
-    return; // no .shares dir yet
+    return; // no shares dir yet
   }
   const now = Date.now();
   for (const id of ids) {

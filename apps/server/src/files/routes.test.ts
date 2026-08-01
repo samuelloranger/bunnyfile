@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, mock } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Elysia } from 'elysia';
@@ -179,28 +179,22 @@ describe('files routes', () => {
     expect(await res.text()).toBe('789');
   });
 
-  it('rejects reserved internal prefixes from the files API', async () => {
-    // Listing, creating, and deleting under s3/ / .multipart must be refused so
-    // the web file API cannot touch the S3 object tree or scratch dirs.
-    expect((await request('/api/files?prefix=s3')).status).toBe(400);
-    const createRes = await request('/api/files/folder', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: 's3/evil' }),
-    });
-    expect(createRes.status).toBe(400);
-    const deleteRes = await request('/api/files', {
-      method: 'DELETE',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: '.multipart' }),
-    });
-    expect(deleteRes.status).toBe(400);
+  it('keeps the S3 object tree out of the files browser', async () => {
+    // S3 lives at DATA_DIR/s3 (sibling of files/); creating a user folder named
+    // s3 under FILES_ROOT is allowed, but the real S3 tree must not appear.
+    await mkdir(join(process.env.DATA_DIR!, 's3', 'bucket'), { recursive: true });
+    await writeFile(join(process.env.DATA_DIR!, 's3', 'bucket', 'secret.txt'), 'nope');
 
-    // A reserved dir on disk (e.g. the S3 tree) must not surface in the root listing.
-    await mkdir(join(process.env.DATA_DIR!, 's3'), { recursive: true });
     const rootRes = await request('/api/files?prefix=');
+    expect(rootRes.status).toBe(200);
     const root = (await rootRes.json()) as { entries: Array<{ path: string }> };
     expect(root.entries.some((e) => e.path === 's3')).toBe(false);
+
+    // Listing via API cannot reach DATA_DIR/s3 — prefix s3 is under FILES_ROOT.
+    const s3List = await request('/api/files?prefix=s3');
+    expect(s3List.status).toBe(200);
+    const listed = (await s3List.json()) as { entries: Array<{ path: string }> };
+    expect(listed.entries.some((e) => e.path.includes('secret'))).toBe(false);
   });
 });
 

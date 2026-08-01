@@ -23,7 +23,7 @@ const [
   { db },
   { fileIndex, user },
   { sharesRoutes },
-  { writeUpload, absFromRelOrThrow },
+  { writeUpload, absFromRelOrThrow, SHARES_ROOT },
 ] = await Promise.all([
   import('../db/migrate'),
   import('../db'),
@@ -84,7 +84,7 @@ describe('folder shares', () => {
     expect(created.token).toBeTruthy();
 
     // zip materialized on disk
-    const zipAbs = absFromRelOrThrow(`.shares/${created.id}/${folder}.zip`);
+    const zipAbs = join(SHARES_ROOT, created.id, `${folder}.zip`);
     expect((await stat(zipAbs)).size).toBeGreaterThan(0);
 
     // 2. public metadata reports a zip
@@ -145,7 +145,7 @@ describe('folder shares', () => {
     const created = (await createRes.json()) as { id: string; token: string };
 
     // Create materializes a zip; remove it so we can prove metadata GET does not rebuild.
-    await rm(absFromRelOrThrow(`.shares/${created.id}`), { recursive: true, force: true });
+    await rm(join(SHARES_ROOT, created.id), { recursive: true, force: true });
 
     const metaRes = await request(`/api/shares/public/${created.token}`);
     expect(metaRes.status).toBe(200);
@@ -156,6 +156,6 @@ describe('folder shares', () => {
     expect(meta.size).toBeUndefined();
     expect(meta.mime).toBeUndefined();
 
-    await expect(stat(absFromRelOrThrow(`.shares/${created.id}`))).rejects.toThrow();
+    await expect(stat(join(SHARES_ROOT, created.id))).rejects.toThrow();
   });
 });
