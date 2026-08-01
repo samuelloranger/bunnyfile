@@ -130,3 +130,64 @@ describe('Public Share Access — inspect', () => {
     if (maxed.status === 'unavailable') expect(maxed.reason).toBe('max_downloads');
   });
 });
+
+describe('Public Share Access — verify', () => {
+  test('wrong password → unauthorized', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      passwordHash: await Bun.password.hash('secret'),
+      createdByUserId: 'access-user',
+    });
+    const r = await access.verify(token, 'nope');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe('unauthorized');
+  });
+
+  test('correct password → unlocked meta', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      passwordHash: await Bun.password.hash('secret'),
+      createdByUserId: 'access-user',
+    });
+    const r = await access.verify(token, 'secret');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.name).toBe('hello.txt');
+      expect(r.requiresPassword).toBe(true);
+      expect(r.size).toBeGreaterThan(0);
+    }
+  });
+
+  test('open share verify without password still unlocks', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      createdByUserId: 'access-user',
+    });
+    const r = await access.verify(token);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.requiresPassword).toBe(false);
+  });
+
+  test('revoked share verify → unavailable', async () => {
+    const token = crypto.randomUUID();
+    await db.insert(shareLink).values({
+      id: crypto.randomUUID(),
+      token,
+      path: 'hello.txt',
+      revokedAt: new Date(),
+      createdByUserId: 'access-user',
+    });
+    const r = await access.verify(token, 'secret');
+    expect(r.ok).toBe(false);
+    if (!r.ok && r.error === 'unavailable') expect(r.reason).toBe('revoked');
+  });
+});

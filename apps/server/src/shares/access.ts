@@ -36,7 +36,6 @@ export type InspectResult =
     }
   | ({ status: 'unlocked'; requiresPassword: false } & SharePublicMeta);
 
-type ShareStatus = 'ok' | ShareUnavailableReason;
 type ShareState =
   | { status: 'ok'; row: ShareLinkRow }
   | { status: ShareUnavailableReason; row?: ShareLinkRow };
@@ -129,4 +128,33 @@ export async function inspect(token: string): Promise<InspectResult> {
 
   const meta = await buildUnlockedPublicMeta(row);
   return { status: 'unlocked', requiresPassword: false, ...meta };
+}
+
+export type VerifyResult =
+  | ({ ok: true } & SharePublicMeta)
+  | { ok: false; error: 'unavailable'; reason: ShareUnavailableReason; message: string }
+  | { ok: false; error: 'unauthorized'; message: string };
+
+export async function verify(token: string, password?: string | null): Promise<VerifyResult> {
+  const state = await getShareState(token);
+  if (state.status !== 'ok') {
+    return {
+      ok: false,
+      error: 'unavailable',
+      reason: state.status,
+      message: statusMessage(state.status),
+    };
+  }
+  const row = state.row;
+  if (row.passwordHash) {
+    if (!password || !(await Bun.password.verify(password, row.passwordHash))) {
+      return {
+        ok: false,
+        error: 'unauthorized',
+        message: 'Password required or invalid.',
+      };
+    }
+  }
+  const meta = await buildUnlockedPublicMeta(row);
+  return { ok: true, ...meta };
 }
