@@ -2,7 +2,7 @@ import { type FSWatcher, watch } from 'node:fs';
 import { Elysia } from 'elysia';
 import { broadcastFilesChanged } from './events';
 import { logScanReport, scan } from './scanner';
-import { DATA_ROOT } from './store';
+import { FILES_ROOT } from './store';
 
 const DEBOUNCE_MS = 500;
 
@@ -21,7 +21,7 @@ export const filesWatcher = new Elysia({ name: 'files/watcher' })
   .onStart(({ store }) => {
     try {
       const watcher = watch(
-        DATA_ROOT,
+        FILES_ROOT,
         { recursive: true, persistent: false },
         (_event, filename) => {
           // Ignore our own in-flight uploads and hidden files.
@@ -47,7 +47,7 @@ export const filesWatcher = new Elysia({ name: 'files/watcher' })
         console.warn('[watcher] disabled after error — falling back to cron only:', err.message);
       });
       store.watcher = watcher;
-      console.log(`[watcher] live watch on ${DATA_ROOT}`);
+      console.log(`[watcher] live watch on ${FILES_ROOT}`);
     } catch (err) {
       console.warn(
         '[watcher] not supported on this filesystem — using cron only:',

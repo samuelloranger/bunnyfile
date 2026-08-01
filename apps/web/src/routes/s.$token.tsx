@@ -13,10 +13,22 @@ export const Route = createFileRoute('/s/$token')({
   component: PublicSharePage,
 });
 
+type UnlockedMeta = {
+  name: string;
+  size: number | null;
+  mime: string;
+  requiresPassword: boolean;
+  expiresAt: string | number | Date | null;
+  maxDownloads: number | null;
+  downloadCount: number;
+};
+
 function PublicSharePage() {
   const { token } = Route.useParams();
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState<UnlockedMeta | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const share = useQuery({
     queryKey: ['public-share', token],
@@ -31,23 +43,49 @@ function PublicSharePage() {
   const status =
     share.data && 'status' in share.data && share.data.status !== 'ok' ? share.data.status : null;
 
-  const [downloading, setDownloading] = useState(false);
+  const lockedOk =
+    share.data &&
+    'status' in share.data &&
+    share.data.status === 'ok' &&
+    share.data.requiresPassword === true
+      ? share.data
+      : null;
+
+  const openOk =
+    share.data &&
+    'status' in share.data &&
+    share.data.status === 'ok' &&
+    share.data.requiresPassword === false &&
+    'name' in share.data
+      ? share.data
+      : null;
+
+  const display: UnlockedMeta | null =
+    unlocked ??
+    (openOk
+      ? {
+          name: openOk.name,
+          size: openOk.size ?? null,
+          mime: openOk.mime,
+          requiresPassword: false,
+          expiresAt: openOk.expiresAt,
+          maxDownloads: openOk.maxDownloads,
+          downloadCount: openOk.downloadCount,
+        }
+      : null);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (downloading) return;
     setPasswordError(null);
-    const needsPw =
-      share.data && 'status' in share.data && share.data.status === 'ok'
-        ? share.data.requiresPassword
-        : false;
+    const form = e.currentTarget;
+    const needsPw = Boolean(lockedOk) && !unlocked;
     if (needsPw && !password.trim()) {
       setPasswordError('Enter the password before downloading.');
       return;
     }
     try {
       setDownloading(true);
-      // Validate password first
       const res = await fetch(`/api/shares/public/${encodeURIComponent(token)}/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,17 +96,36 @@ function PublicSharePage() {
         try {
           const body = (await res.json()) as { error?: string };
           if (body?.error) msg = body.error;
-        } catch {}
+        } catch {
+          // ignore parse errors
+        }
         setPasswordError(msg);
         setDownloading(false);
         return;
       }
+      const body = (await res.json()) as {
+        ok: boolean;
+        name: string;
+        size: number | null;
+        mime: string;
+        requiresPassword: boolean;
+        expiresAt: string | number | Date | null;
+        maxDownloads: number | null;
+        downloadCount: number;
+      };
+      setUnlocked({
+        name: body.name,
+        size: body.size,
+        mime: body.mime,
+        requiresPassword: body.requiresPassword,
+        expiresAt: body.expiresAt,
+        maxDownloads: body.maxDownloads,
+        downloadCount: body.downloadCount,
+      });
 
-      // Password is valid (or none required)! Trigger a native GET download.
-      const queryParams = password.trim() ? `?password=${encodeURIComponent(password.trim())}` : '';
-      window.location.href = `/api/shares/public/${encodeURIComponent(token)}/file${queryParams}`;
+      // Native form POST (bypasses React onSubmit) so the password stays in the body.
+      HTMLFormElement.prototype.submit.call(form);
 
-      // Show temporary downloading state for 5 seconds to give visual feedback, then reset loading state.
       setTimeout(() => {
         setDownloading(false);
       }, 5000);
@@ -77,9 +134,6 @@ function PublicSharePage() {
       setDownloading(false);
     }
   }
-
-  const okShare =
-    share.data && 'status' in share.data && share.data.status === 'ok' ? share.data : null;
 
   return (
     <div className="flex min-h-dvh flex-col bg-[hsl(var(--background))]">
@@ -114,30 +168,39 @@ function PublicSharePage() {
             </div>
           )}
 
-          {okShare && (
+          {(lockedOk || openOk) && (
             <div className="space-y-5">
               <div className="space-y-2">
-                <h1 className="truncate text-2xl font-semibold tracking-tight">{okShare.name}</h1>
-                <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                  {okShare.size != null ? humanSize(okShare.size) : 'Size unknown'} ·{' '}
-                  {displayMimeLabel(okShare.mime, okShare.name)}
-                </p>
+                <h1 className="truncate text-2xl font-semibold tracking-tight">
+                  {display?.name ?? 'Password protected share'}
+                </h1>
+                {display ? (
+                  <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                    {display.size != null ? humanSize(display.size) : 'Size unknown'} ·{' '}
+                    {displayMimeLabel(display.mime, display.name)}
+                  </p>
+                ) : (
+                  <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                    Enter the password to see details and download.
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  {okShare.requiresPassword && (
+                  {(lockedOk || display?.requiresPassword) && (
                     <Badge variant="outline">
                       <LockKeyhole className="size-3" /> Password protected
                     </Badge>
                   )}
-                  {okShare.expiresAt && (
+                  {(display?.expiresAt ?? lockedOk?.expiresAt) && (
                     <Badge variant="outline">
                       <Clock className="size-3" />
-                      Expires {formatExpiry(okShare.expiresAt)}
+                      Expires {formatExpiry(display?.expiresAt ?? lockedOk!.expiresAt!)}
                     </Badge>
                   )}
-                  {okShare.maxDownloads != null && (
+                  {(display?.maxDownloads ?? lockedOk?.maxDownloads) != null && (
                     <Badge variant="outline">
                       <ShieldAlert className="size-3" />
-                      {okShare.downloadCount} / {okShare.maxDownloads} downloads used
+                      {display?.downloadCount ?? lockedOk!.downloadCount ?? 0} /{' '}
+                      {display?.maxDownloads ?? lockedOk!.maxDownloads} downloads used
                     </Badge>
                   )}
                 </div>
@@ -149,7 +212,7 @@ function PublicSharePage() {
                 onSubmit={handleSubmit}
                 className="space-y-4"
               >
-                {okShare.requiresPassword && (
+                {(lockedOk || display?.requiresPassword) && (
                   <div className="space-y-1">
                     <p className="text-xs text-[hsl(var(--muted-foreground))]">
                       Password required to download

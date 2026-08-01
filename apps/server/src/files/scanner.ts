@@ -6,10 +6,10 @@ import { fileIndex } from '../db/schema';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
 import { deleteFileSearch, upsertFileSearch } from './search';
-import { DATA_ROOT, hashOnDisk } from './store';
+import { FILES_ROOT, hashOnDisk } from './store';
 
 /**
- * Walk DATA_ROOT, reconcile against file_index.
+ * Walk FILES_ROOT, reconcile against file_index.
  *  - Insert rows for new files
  *  - Update rows whose size/mtime/inode changed (invalidates cached sha256)
  *  - Delete rows whose file no longer exists
@@ -31,13 +31,8 @@ async function* walk(abs: string, rel: string): AsyncGenerator<DiskEntry> {
   const entries = await readdir(abs, { withFileTypes: true });
   for (const entry of entries) {
     // Dotfiles are skipped — this also covers in-flight/orphaned upload temp
-    // files, which are written dot-prefixed (see writeUpload in store.ts), and
-    // the `.trash` / `.multipart` internal dirs.
+    // files, which are written dot-prefixed (see writeUpload in store.ts).
     if (entry.name.startsWith('.')) continue;
-    // The S3 object tree lives at the root `s3/` dir and is owned by the S3
-    // API, not the user file index. Don't index it. (A user folder named `s3`
-    // nested deeper is fine — only the root one is reserved.)
-    if (rel === '' && entry.name === 's3') continue;
     const nextAbs = `${abs}${sep}${entry.name}`;
     const nextRel = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
@@ -56,7 +51,7 @@ async function* walk(abs: string, rel: string): AsyncGenerator<DiskEntry> {
 
 async function enumerateDisk(): Promise<Map<string, DiskEntry>> {
   const map = new Map<string, DiskEntry>();
-  for await (const entry of walk(DATA_ROOT, '')) {
+  for await (const entry of walk(FILES_ROOT, '')) {
     map.set(entry.path, entry);
   }
   return map;

@@ -6,13 +6,13 @@ import { db } from '../db';
 import { s3MultipartPart, s3MultipartUpload, s3Object } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
-import { absFromRelOrThrow, DATA_ROOT } from '../files/store';
+import { absFromRelOrThrow, MULTIPART_ROOT } from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { trackUpload } from '../inflight';
 import { bodyStream } from './chunked';
 import { s3ErrorXml, xmlDocument } from './xml';
 
-const MULTIPART_DIR = resolve(DATA_ROOT, '.multipart');
+const MULTIPART_DIR = MULTIPART_ROOT;
 
 // uploadIds are server-minted UUIDs. Validating the format before using one in
 // a filesystem path stops a crafted id (e.g. "../../..") from escaping

@@ -13,6 +13,7 @@ import {
   openStream,
   readRange,
   removeFile,
+  S3_ROOT,
   writeUpload,
 } from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
@@ -22,10 +23,6 @@ import { handleMultipart } from './multipart';
 import { verifyPresigned, verifySigV4 } from './sigv4';
 import { s3ErrorXml, xmlDocument } from './xml';
 
-const S3_ROOT = resolve(
-  Bun.env.DATA_DIR ? Bun.env.DATA_DIR : resolve(import.meta.dir, '../../data/files'),
-  's3',
-);
 await mkdir(S3_ROOT, { recursive: true });
 
 function s3Config() {

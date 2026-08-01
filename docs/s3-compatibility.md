@@ -2,6 +2,23 @@
 
 BunnyFile exposes an AWS Signature Version 4 S3-compatible API at `/api/s3`. The goal is the **95% path** — enough for backup tools and file clients, not full AWS parity.
 
+## Storage model
+
+`DATA_DIR` is a container with sibling trees:
+
+```
+DATA_DIR/
+  files/       # user-browsable Files UI + share sources
+  s3/          # S3 object bytes (buckets/keys)
+  trash/       # soft-deleted files
+  shares/      # cached folder-share zips
+  multipart/   # S3 multipart scratch
+```
+
+The **Files browser and the S3 API are separate namespaces**: objects written with rclone do not appear in the file browser, and files uploaded in the UI are not reachable as S3 objects. Buckets are global — any valid access key can reach every bucket (see README Security on the shared-workspace model). Do not hand-edit the internal directories. A backup of `DATA_DIR` includes user files, S3 objects, trash, share caches, and multipart scratch.
+
+On upgrade from pre-v2 layouts, the first boot moves legacy user entries into `files/` and renames `.trash`/`.shares`/`.multipart` (idempotent; writes `.bunnyfile-layout-v2`).
+
 ## Supported operations
 
 | Operation | Notes |

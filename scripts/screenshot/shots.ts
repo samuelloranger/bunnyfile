@@ -21,6 +21,11 @@ function shot(name: string) {
   return page.screenshot({ path: join(OUT, `${name}.png`) });
 }
 
+// Prefer dark mode for r/selfhosted-style README shots.
+await page.addInitScript(() => {
+  window.localStorage.setItem('bunnyfile.theme', 'dark');
+});
+
 // --- First-run admin setup -------------------------------------------------
 await page.goto(`${BASE}/setup`, { waitUntil: 'networkidle' });
 await page.getByPlaceholder('Ada Lovelace').fill(ADMIN.name);
@@ -32,6 +37,14 @@ await page.waitForURL('**/files**', { timeout: 30_000 });
 // Prefer list view — that's where row double-click + the actions menu live.
 await page.getByRole('button', { name: 'List view' }).click();
 await page.getByText('Welcome.md', { exact: true }).waitFor();
+
+// One search chrome in the hero shot: keep the topbar, hide the in-page filter row.
+await page.locator('main').evaluate((main) => {
+  const input = main.querySelector('input[placeholder*="Filter"], input[placeholder*="Search"]');
+  const row = input?.closest('div.flex.flex-wrap');
+  if (row instanceof HTMLElement) row.style.display = 'none';
+});
+
 await page.waitForTimeout(400); // let thumbnails/layout settle
 await shot('browser');
 

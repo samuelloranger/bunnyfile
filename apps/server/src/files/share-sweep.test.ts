@@ -8,7 +8,7 @@ process.env.DB_PATH = join(testRoot, 'test.sqlite');
 process.env.DATA_DIR = join(testRoot, 'data');
 process.env.BETTER_AUTH_SECRET = 'test-secret';
 
-const [{ runMigrations }, { db }, { shareLink }, { absFromRelOrThrow }, { sweepShareZips }] =
+const [{ runMigrations }, { db }, { shareLink }, { SHARES_ROOT }, { sweepShareZips }] =
   await Promise.all([
     import('../db/migrate'),
     import('../db'),
@@ -18,8 +18,8 @@ const [{ runMigrations }, { db }, { shareLink }, { absFromRelOrThrow }, { sweepS
   ]);
 
 async function seedZipDir(id: string) {
-  await mkdir(absFromRelOrThrow(`.shares/${id}`), { recursive: true });
-  await writeFile(absFromRelOrThrow(`.shares/${id}/x.zip`), 'z');
+  await mkdir(join(SHARES_ROOT, id), { recursive: true });
+  await writeFile(join(SHARES_ROOT, id, 'x.zip'), 'z');
 }
 
 describe('sweepShareZips', () => {
@@ -51,9 +51,9 @@ describe('sweepShareZips', () => {
 
     await sweepShareZips();
 
-    expect((await stat(absFromRelOrThrow(`.shares/${active}`))).isDirectory()).toBe(true);
-    await expect(stat(absFromRelOrThrow(`.shares/${revoked}`))).rejects.toThrow();
-    await expect(stat(absFromRelOrThrow(`.shares/${expired}`))).rejects.toThrow();
-    await expect(stat(absFromRelOrThrow(`.shares/${orphan}`))).rejects.toThrow();
+    expect((await stat(join(SHARES_ROOT, active))).isDirectory()).toBe(true);
+    await expect(stat(join(SHARES_ROOT, revoked))).rejects.toThrow();
+    await expect(stat(join(SHARES_ROOT, expired))).rejects.toThrow();
+    await expect(stat(join(SHARES_ROOT, orphan))).rejects.toThrow();
   });
 });

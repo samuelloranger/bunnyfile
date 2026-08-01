@@ -6,6 +6,7 @@ import { join } from 'node:path';
 // In-memory DB + temp data dir + mail capture, set before any module loads.
 process.env.DB_PATH = ':memory:';
 process.env.MAIL_CAPTURE = '1';
+process.env.BETTER_AUTH_SECRET = 'test-secret-for-reset';
 const dataDir = await mkdtemp(join(tmpdir(), 'bf-reset-'));
 process.env.DATA_DIR = dataDir;
 

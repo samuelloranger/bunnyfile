@@ -1,9 +1,14 @@
-import { readFile, stat, writeFile } from 'node:fs/promises';
+/**
+ * @internal Access-only — folder-share zip cache policy.
+ * Callers must go through Public Share Access (`./access`), not this module.
+ */
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import { db } from '../db';
 import { fileIndex } from '../db/schema';
 import { basenameOf } from '../files/paths';
-import { absFromRelOrThrow } from '../files/store';
+import { absFromRelOrThrow, SHARES_ROOT } from '../files/store';
 import { zipFolderToFile } from '../files/zip';
 
 // ponytail: in-process rebuild lock. The app is one Bun process (see CLAUDE.md
@@ -15,11 +20,19 @@ function escapeLike(s: string): string {
 }
 
 export function zipRelForShare(id: string, folderRel: string): string {
-  return `.shares/${id}/${basenameOf(folderRel)}.zip`;
+  return `shares/${id}/${basenameOf(folderRel)}.zip`;
 }
 
 export function fpRelForShare(id: string): string {
-  return `.shares/${id}/.fp`;
+  return `shares/${id}/.fp`;
+}
+
+function zipAbsForShare(id: string, folderRel: string): string {
+  return join(SHARES_ROOT, id, `${basenameOf(folderRel)}.zip`);
+}
+
+function fpAbsForShare(id: string): string {
+  return join(SHARES_ROOT, id, '.fp');
 }
 
 export async function folderFingerprint(folderRel: string): Promise<string> {
@@ -37,16 +50,17 @@ export async function folderFingerprint(folderRel: string): Promise<string> {
 
 export async function buildShareZip(id: string, folderRel: string, fp?: string): Promise<void> {
   const want = fp ?? (await folderFingerprint(folderRel));
-  const zipAbs = absFromRelOrThrow(zipRelForShare(id, folderRel));
+  const zipAbs = zipAbsForShare(id, folderRel);
+  await mkdir(join(SHARES_ROOT, id), { recursive: true });
   await zipFolderToFile(absFromRelOrThrow(folderRel), zipAbs);
-  await writeFile(absFromRelOrThrow(fpRelForShare(id)), want, 'utf8');
+  await writeFile(fpAbsForShare(id), want, 'utf8');
 }
 
 export async function ensureShareZip(
   id: string,
   folderRel: string,
 ): Promise<{ abs: string; size: number }> {
-  const zipAbs = absFromRelOrThrow(zipRelForShare(id, folderRel));
+  const zipAbs = zipAbsForShare(id, folderRel);
   const inflight = rebuilds.get(id);
   if (inflight) {
     await inflight;
@@ -54,7 +68,7 @@ export async function ensureShareZip(
     const want = await folderFingerprint(folderRel);
     let have: string | null = null;
     try {
-      have = await readFile(absFromRelOrThrow(fpRelForShare(id)), 'utf8');
+      have = await readFile(fpAbsForShare(id), 'utf8');
     } catch {
       // no sidecar yet
     }

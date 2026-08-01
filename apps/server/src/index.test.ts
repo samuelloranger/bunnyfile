@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 // Force an in-memory SQLite for tests before any module imports open the DB.
 process.env.DB_PATH = ':memory:';
+process.env.BETTER_AUTH_SECRET = 'test-secret-for-index';
 
 const { app } = await import('./index');
 

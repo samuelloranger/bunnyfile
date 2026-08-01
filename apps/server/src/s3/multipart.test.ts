@@ -7,6 +7,7 @@ import { join } from 'node:path';
 const testRoot = await mkdtemp(join(tmpdir(), 'bunnyfile-s3-mpu-test-'));
 process.env.DB_PATH = join(testRoot, 'test.sqlite');
 process.env.DATA_DIR = join(testRoot, 'data');
+process.env.BETTER_AUTH_SECRET = 'test-secret-for-s3-mpu';
 process.env.S3_ACCESS_KEY_ID = 'mpu-access-key';
 process.env.S3_SECRET_ACCESS_KEY = 'mpu-secret-key';
 process.env.S3_REGION = 'us-east-1';
