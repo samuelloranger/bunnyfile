@@ -38,9 +38,9 @@ describe('Public Share Access — inspect', () => {
       emailVerified: true,
       role: 'admin',
     });
-    const info = await writeUpload('hello.txt', streamFromText('hello world'));
+    const info = await writeUpload('access-hello.txt', streamFromText('hello world'));
     await db.insert(fileIndex).values({
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       size: info.size,
       mtimeMs: info.mtimeMs,
       inode: info.inode,
@@ -61,7 +61,7 @@ describe('Public Share Access — inspect', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       passwordHash: await Bun.password.hash('secret'),
       createdByUserId: 'access-user',
     });
@@ -81,13 +81,13 @@ describe('Public Share Access — inspect', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       createdByUserId: 'access-user',
     });
     const r = await access.inspect(token);
     expect(r.status).toBe('unlocked');
     if (r.status === 'unlocked') {
-      expect(r.name).toBe('hello.txt');
+      expect(r.name).toBe('access-hello.txt');
       expect(r.size).toBeGreaterThan(0);
       expect(r.mime).toBe('text/plain');
       expect(r.requiresPassword).toBe(false);
@@ -99,7 +99,7 @@ describe('Public Share Access — inspect', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token: expiredToken,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       expiresAt: new Date(Date.now() - 60_000),
       createdByUserId: 'access-user',
     });
@@ -109,7 +109,7 @@ describe('Public Share Access — inspect', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token: revokedToken,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       revokedAt: new Date(),
       createdByUserId: 'access-user',
     });
@@ -121,7 +121,7 @@ describe('Public Share Access — inspect', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token: maxedToken,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       maxDownloads: 1,
       downloadCount: 1,
       createdByUserId: 'access-user',
@@ -138,7 +138,7 @@ describe('Public Share Access — verify', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       passwordHash: await Bun.password.hash('secret'),
       createdByUserId: 'access-user',
     });
@@ -152,14 +152,14 @@ describe('Public Share Access — verify', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       passwordHash: await Bun.password.hash('secret'),
       createdByUserId: 'access-user',
     });
     const r = await access.verify(token, 'secret');
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.name).toBe('hello.txt');
+      expect(r.name).toBe('access-hello.txt');
       expect(r.requiresPassword).toBe(true);
       expect(r.size).toBeGreaterThan(0);
     }
@@ -170,7 +170,7 @@ describe('Public Share Access — verify', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       createdByUserId: 'access-user',
     });
     const r = await access.verify(token);
@@ -183,7 +183,7 @@ describe('Public Share Access — verify', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       revokedAt: new Date(),
       createdByUserId: 'access-user',
     });
@@ -199,7 +199,7 @@ describe('Public Share Access — beginDownload (file)', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       createdByUserId: 'access-user',
     });
     const r = await access.beginDownload(token);
@@ -215,7 +215,7 @@ describe('Public Share Access — beginDownload (file)', () => {
     await db.insert(shareLink).values({
       id: crypto.randomUUID(),
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       passwordHash: await Bun.password.hash('secret'),
       createdByUserId: 'access-user',
     });
@@ -230,7 +230,7 @@ describe('Public Share Access — beginDownload (file)', () => {
     await db.insert(shareLink).values({
       id,
       token,
-      path: 'hello.txt',
+      path: 'access-hello.txt',
       maxDownloads: 1,
       downloadCount: 0,
       createdByUserId: 'access-user',
