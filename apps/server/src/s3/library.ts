@@ -1,6 +1,16 @@
 import { mkdir, readdir, rm, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { S3_ROOT } from '../files/store';
+import { dirname, join, resolve } from 'node:path';
+import { eq } from 'drizzle-orm';
+import { db } from '../db';
+import { s3Object } from '../db/schema';
+import {
+  createFileStream,
+  openStream,
+  PathError,
+  removeFile,
+  S3_ROOT,
+  writeUpload,
+} from '../files/store';
 
 export class BucketError extends Error {
   constructor(
@@ -112,4 +122,151 @@ export async function deleteBucket(name: string): Promise<void> {
     throw new BucketError('bucket_not_empty', `bucket is not empty: ${name}`);
   }
   await rm(bucketDir, { recursive: true, force: true });
+}
+
+export function objectRel(bucket: string, key: string): string {
+  return `s3/${bucket}/${key}`;
+}
+
+export type ObjectInfo = {
+  key: string;
+  size: number;
+  mtimeMs: number;
+  md5: string;
+};
+
+async function ensureBucketExists(bucket: string): Promise<void> {
+  assertBucketName(bucket);
+  const bucketDir = join(S3_ROOT, bucket);
+  try {
+    const st = await stat(bucketDir);
+    if (!st.isDirectory()) {
+      throw new BucketError('not_found', `bucket not found: ${bucket}`);
+    }
+  } catch (err) {
+    if (err instanceof BucketError) throw err;
+    if (err instanceof Error && 'code' in err && err.code === 'ENOENT') {
+      throw new BucketError('not_found', `bucket not found: ${bucket}`);
+    }
+    throw err;
+  }
+}
+
+async function pruneEmptyParents(start: string, stopAt: string): Promise<void> {
+  let current = start;
+  while (current.startsWith(stopAt) && current !== stopAt) {
+    try {
+      await rm(current, { recursive: false });
+    } catch {
+      return;
+    }
+    current = dirname(current);
+  }
+}
+
+async function readObjectInfo(bucket: string, key: string): Promise<ObjectInfo> {
+  const rel = objectRel(bucket, key);
+  let opened: Awaited<ReturnType<typeof openStream>>;
+  try {
+    opened = await openStream(rel);
+  } catch (err) {
+    if (err instanceof PathError && err.code === 'not_found') {
+      throw new BucketError('not_found', `object not found: ${bucket}/${key}`);
+    }
+    if (err instanceof PathError && err.code === 'is_directory') {
+      throw new BucketError('is_directory', `is a directory: ${bucket}/${key}`);
+    }
+    throw err;
+  }
+  const row = db.select({ md5: s3Object.md5 }).from(s3Object).where(eq(s3Object.path, rel)).get();
+  return {
+    key,
+    size: opened.stat.size,
+    mtimeMs: Math.round(opened.stat.mtimeMs),
+    md5: row?.md5 ?? '',
+  };
+}
+
+export async function putObject(
+  bucket: string,
+  key: string,
+  stream: ReadableStream<Uint8Array>,
+): Promise<ObjectInfo> {
+  assertBucketName(bucket);
+  assertObjectKey(key);
+  await mkdir(join(S3_ROOT, bucket), { recursive: true });
+  const rel = objectRel(bucket, key);
+  const result = await writeUpload(rel, stream);
+  await db
+    .insert(s3Object)
+    .values({
+      path: rel,
+      bucket,
+      key,
+      size: result.size,
+      mtimeMs: result.mtimeMs,
+      inode: result.inode,
+      md5: result.md5,
+    })
+    .onConflictDoUpdate({
+      target: s3Object.path,
+      set: {
+        size: result.size,
+        mtimeMs: result.mtimeMs,
+        inode: result.inode,
+        md5: result.md5,
+      },
+    });
+  return {
+    key,
+    size: result.size,
+    mtimeMs: result.mtimeMs,
+    md5: result.md5,
+  };
+}
+
+export async function headObject(bucket: string, key: string): Promise<ObjectInfo> {
+  assertBucketName(bucket);
+  assertObjectKey(key);
+  await ensureBucketExists(bucket);
+  return readObjectInfo(bucket, key);
+}
+
+export async function openObjectStream(
+  bucket: string,
+  key: string,
+): Promise<{ info: ObjectInfo; stream: ReadableStream<Uint8Array> }> {
+  assertBucketName(bucket);
+  assertObjectKey(key);
+  await ensureBucketExists(bucket);
+  const rel = objectRel(bucket, key);
+  let opened: Awaited<ReturnType<typeof openStream>>;
+  try {
+    opened = await openStream(rel);
+  } catch (err) {
+    if (err instanceof PathError && err.code === 'not_found') {
+      throw new BucketError('not_found', `object not found: ${bucket}/${key}`);
+    }
+    if (err instanceof PathError && err.code === 'is_directory') {
+      throw new BucketError('is_directory', `is a directory: ${bucket}/${key}`);
+    }
+    throw err;
+  }
+  const info = await readObjectInfo(bucket, key);
+  return { info, stream: createFileStream(opened.path) };
+}
+
+export async function deleteObject(bucket: string, key: string): Promise<void> {
+  assertBucketName(bucket);
+  assertObjectKey(key);
+  const rel = objectRel(bucket, key);
+  const bucketDir = join(S3_ROOT, bucket);
+  const absObject = join(S3_ROOT, bucket, key);
+  try {
+    await removeFile(rel);
+    await pruneEmptyParents(dirname(absObject), bucketDir);
+  } catch {
+    // DELETE is idempotent
+  }
+  await db.delete(s3Object).where(eq(s3Object.path, rel));
 }

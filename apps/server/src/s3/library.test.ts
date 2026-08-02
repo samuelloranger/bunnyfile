@@ -8,8 +8,20 @@ process.env.DB_PATH = join(testRoot, 'test.sqlite');
 process.env.DATA_DIR = join(testRoot, 'data');
 process.env.BETTER_AUTH_SECRET = 'test-secret-for-s3-library';
 
-const [{ BucketError, createBucket, deleteBucket, listBuckets }, { runMigrations }, { S3_ROOT }] =
-  await Promise.all([import('./library'), import('../db/migrate'), import('../files/store')]);
+const [
+  {
+    BucketError,
+    createBucket,
+    deleteBucket,
+    deleteObject,
+    headObject,
+    listBuckets,
+    openObjectStream,
+    putObject,
+  },
+  { runMigrations },
+  { S3_ROOT },
+] = await Promise.all([import('./library'), import('../db/migrate'), import('../files/store')]);
 
 beforeAll(async () => {
   await runMigrations();
@@ -76,5 +88,37 @@ describe('Bucket Library buckets', () => {
       expect(err).toBeInstanceOf(BucketError);
       expect((err as BucketError).code).toBe('not_found');
     }
+  });
+});
+
+describe('Bucket Library objects', () => {
+  test('putObject then openObjectStream is byte-exact', async () => {
+    await createBucket('b');
+    const body = new TextEncoder().encode('hello-s3');
+    const put = await putObject('b', 'a/hi.txt', new Blob([body]).stream());
+    expect(put.size).toBe(body.byteLength);
+    expect(put.md5.length).toBe(32);
+    const { stream, info } = await openObjectStream('b', 'a/hi.txt');
+    expect(info.size).toBe(body.byteLength);
+    expect(info.md5).toBe(put.md5);
+    const got = new Uint8Array(await new Response(stream).arrayBuffer());
+    expect(got).toEqual(body);
+  });
+
+  test('rejects key with .. segment', async () => {
+    await createBucket('b');
+    await expect(putObject('b', 'a/../b', new Blob(['x']).stream())).rejects.toBeInstanceOf(
+      BucketError,
+    );
+  });
+
+  test('headObject and deleteObject', async () => {
+    await createBucket('b');
+    await putObject('b', 'gone.txt', new Blob(['bye']).stream());
+    const head = await headObject('b', 'gone.txt');
+    expect(head.size).toBe(3);
+    await deleteObject('b', 'gone.txt');
+    await expect(headObject('b', 'gone.txt')).rejects.toBeInstanceOf(BucketError);
+    await deleteObject('b', 'gone.txt'); // idempotent
   });
 });
