@@ -1,24 +1,30 @@
-import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { Elysia } from 'elysia';
-import { db } from '../db';
-import { s3Object } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
 import {
   createFileStream,
   DATA_ROOT,
-  hashOnDisk,
   openStream,
   readRange,
-  removeFile,
   S3_ROOT,
-  writeUpload,
 } from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { lookupS3SecretKey } from './access-keys';
-import { bodyStream } from './chunked';
+import {
+  assertBucketName,
+  BucketError,
+  copyObject,
+  createBucket,
+  deleteBucket,
+  deleteObject,
+  headObject,
+  listBuckets,
+  listObjects,
+  objectRel,
+  putObject,
+} from './library';
 import { handleMultipart } from './multipart';
 import { verifyPresigned, verifySigV4 } from './sigv4';
 import { s3ErrorXml, xmlDocument } from './xml';
@@ -34,10 +40,12 @@ function s3Config() {
 }
 
 function validateBucket(name: string): boolean {
-  if (!name || name.length > 255) return false;
-  if (name.includes('\0') || name.includes('/') || name.includes('\\')) return false;
-  if (name === '.' || name === '..') return false;
-  return true;
+  try {
+    assertBucketName(name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function decodePathPart(raw: string): string | null {
@@ -71,89 +79,6 @@ function splitS3Path(pathname: string): S3PathResult {
   return { bucket, key };
 }
 
-function objectRel(bucket: string, key: string): string {
-  return `s3/${bucket}/${key}`;
-}
-
-async function listBuckets(): Promise<Array<{ name: string; createdAt: string }>> {
-  const entries = await readdir(S3_ROOT, { withFileTypes: true });
-  const results = await Promise.all(
-    entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map(async (e) => {
-        const s = await stat(resolve(S3_ROOT, e.name));
-        return {
-          name: e.name,
-          createdAt: new Date(s.birthtimeMs || s.ctimeMs).toISOString(),
-        };
-      }),
-  );
-  return results.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-type ObjectRow = { key: string; size: number; mtime: string; md5: string };
-
-async function walkObjects(bucketDir: string, bucket: string): Promise<ObjectRow[]> {
-  const dbRows = await db.select().from(s3Object).where(eq(s3Object.bucket, bucket));
-  const md5Map = new Map(dbRows.map((r) => [r.key, r.md5]));
-
-  const out: ObjectRow[] = [];
-  const queue: Array<{ dir: string; prefix: string }> = [{ dir: bucketDir, prefix: '' }];
-  while (queue.length > 0) {
-    const { dir, prefix } = queue.shift()!;
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      const abs = resolve(dir, entry.name);
-      if (entry.isDirectory()) {
-        queue.push({ dir: abs, prefix: rel });
-      } else if (entry.isFile()) {
-        // Skip files removed between readdir and stat — a concurrent delete
-        // must not 500 the whole listing.
-        let st: Awaited<ReturnType<typeof stat>>;
-        try {
-          st = await stat(abs);
-        } catch {
-          continue;
-        }
-        out.push({
-          key: rel,
-          size: st.size,
-          mtime: new Date(st.mtimeMs).toISOString(),
-          md5: md5Map.get(rel) ?? '',
-        });
-      }
-    }
-  }
-  return out.sort((a, b) => a.key.localeCompare(b.key));
-}
-
-async function hasAnyFile(dir: string): Promise<boolean> {
-  const queue = [dir];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const entries = await readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isFile()) return true;
-      if (entry.isDirectory()) queue.push(resolve(current, entry.name));
-    }
-  }
-  return false;
-}
-
-async function pruneEmptyParents(start: string, stopAt: string): Promise<void> {
-  let current = start;
-  while (current.startsWith(stopAt) && current !== stopAt) {
-    try {
-      await rm(current, { recursive: false });
-    } catch {
-      return;
-    }
-    current = dirname(current);
-  }
-}
-
 function xmlResponse(body: string, status = 200): Response {
   return new Response(body, {
     status,
@@ -172,7 +97,72 @@ function s3Err(
   return xmlResponse(s3ErrorXml(code, message, resource), status);
 }
 
+function mapBucketError(
+  set: { status?: number | string },
+  err: BucketError,
+  pathname: string,
+  kind: 'bucket' | 'key' = 'bucket',
+): Response {
+  switch (err.code) {
+    case 'invalid_bucket':
+      return s3Err(set, 400, 'InvalidBucketName', err.message, pathname);
+    case 'invalid_key':
+      return s3Err(set, 400, 'InvalidArgument', err.message, pathname);
+    case 'not_found':
+      return s3Err(
+        set,
+        404,
+        kind === 'bucket' ? 'NoSuchBucket' : 'NoSuchKey',
+        kind === 'bucket' ? 'Bucket not found' : 'Object not found',
+        pathname,
+      );
+    case 'bucket_exists':
+      return s3Err(set, 409, 'BucketAlreadyOwnedByYou', 'Bucket already exists', pathname);
+    case 'bucket_not_empty':
+      return s3Err(set, 409, 'BucketNotEmpty', 'Bucket is not empty', pathname);
+    case 'is_directory':
+      return s3Err(set, 404, 'NoSuchKey', 'Object not found', pathname);
+    default:
+      throw err;
+  }
+}
+
 const S3_XMLNS = 'http://s3.amazonaws.com/doc/2006-03-01/';
+
+function listResultToXml(
+  bucket: string,
+  prefix: string,
+  maxKeys: number,
+  result: Awaited<ReturnType<typeof listObjects>>,
+  extra: Array<{ name: string; value: string }> = [],
+) {
+  return xmlDocument({
+    name: 'ListBucketResult',
+    attributes: { xmlns: S3_XMLNS },
+    children: [
+      { name: 'Name', value: bucket },
+      { name: 'Prefix', value: prefix },
+      { name: 'KeyCount', value: String(result.objects.length + result.prefixes.length) },
+      { name: 'MaxKeys', value: String(maxKeys) },
+      { name: 'IsTruncated', value: String(result.isTruncated) },
+      ...extra,
+      ...result.objects.map((item) => ({
+        name: 'Contents',
+        children: [
+          { name: 'Key', value: item.key },
+          { name: 'LastModified', value: new Date(item.mtimeMs).toISOString() },
+          { name: 'ETag', value: item.md5 ? `"${item.md5}"` : '' },
+          { name: 'Size', value: String(item.size) },
+          { name: 'StorageClass', value: 'STANDARD' },
+        ],
+      })),
+      ...result.prefixes.map((prefixValue) => ({
+        name: 'CommonPrefixes',
+        children: [{ name: 'Prefix', value: prefixValue }],
+      })),
+    ],
+  });
+}
 
 function createS3Handler() {
   return async ({ request, set }: { request: Request; set: { status?: number | string } }) => {
@@ -247,12 +237,9 @@ function createS3Handler() {
     if (!key) {
       if (request.method === 'PUT') {
         try {
-          await mkdir(S3_ROOT, { recursive: true });
-          await mkdir(resolve(S3_ROOT, bucket), { recursive: false });
+          await createBucket(bucket);
         } catch (err) {
-          if (err instanceof Error && 'code' in err && err.code === 'EEXIST') {
-            return s3Err(set, 409, 'BucketAlreadyOwnedByYou', 'Bucket already exists', pathname);
-          }
+          if (err instanceof BucketError) return mapBucketError(set, err, pathname);
           throw err;
         }
         return new Response(null, {
@@ -262,29 +249,22 @@ function createS3Handler() {
       }
       if (request.method === 'DELETE') {
         try {
-          const bucketDir = resolve(S3_ROOT, bucket);
-          const st = await stat(bucketDir);
-          if (!st.isDirectory()) {
-            return s3Err(set, 404, 'NoSuchBucket', 'Bucket not found', pathname);
-          }
-          if (await hasAnyFile(bucketDir)) {
-            return s3Err(set, 409, 'BucketNotEmpty', 'Bucket is not empty', pathname);
-          }
-          await rm(bucketDir, { recursive: true, force: true });
+          await deleteBucket(bucket);
         } catch (err) {
-          if (err instanceof Error && 'code' in err && err.code === 'ENOENT') {
-            return s3Err(set, 404, 'NoSuchBucket', 'Bucket not found', pathname);
-          }
+          if (err instanceof BucketError) return mapBucketError(set, err, pathname);
           throw err;
         }
         return new Response(null, { status: 204 });
       }
       if (request.method === 'HEAD') {
         try {
-          const st = await stat(resolve(S3_ROOT, bucket));
-          if (!st.isDirectory()) return new Response(null, { status: 404 });
-        } catch {
-          return new Response(null, { status: 404 });
+          await listObjects({ bucket, maxKeys: 1 });
+        } catch (err) {
+          if (err instanceof BucketError && err.code === 'not_found') {
+            return new Response(null, { status: 404 });
+          }
+          if (err instanceof BucketError) return mapBucketError(set, err, pathname);
+          throw err;
         }
         return new Response(null, { status: 200 });
       }
@@ -296,64 +276,25 @@ function createS3Handler() {
           Math.max(Number.parseInt(url.searchParams.get('max-keys') ?? '1000', 10) || 1000, 1),
           1000,
         );
-        const bucketDir = resolve(S3_ROOT, bucket);
+        let result: Awaited<ReturnType<typeof listObjects>>;
         try {
-          await stat(bucketDir);
-        } catch {
-          return s3Err(set, 404, 'NoSuchBucket', 'Bucket not found', pathname);
+          result = await listObjects({
+            bucket,
+            prefix,
+            delimiter,
+            continuationToken,
+            maxKeys,
+          });
+        } catch (err) {
+          if (err instanceof BucketError) return mapBucketError(set, err, pathname);
+          throw err;
         }
-        const all = (await walkObjects(bucketDir, bucket)).filter((item) =>
-          item.key.startsWith(prefix),
-        );
-        const filtered = continuationToken
-          ? all.filter((item) => item.key > continuationToken)
-          : all;
-        const page = filtered.slice(0, maxKeys);
-        const isTruncated = filtered.length > page.length;
-        const nextToken = isTruncated ? (page[page.length - 1]?.key ?? '') : '';
-        const commonPrefixes = new Set<string>();
-        const contents: ObjectRow[] = [];
-        for (const item of page) {
-          if (delimiter) {
-            const rest = item.key.slice(prefix.length);
-            const idx = rest.indexOf(delimiter);
-            if (idx >= 0) {
-              commonPrefixes.add(item.key.slice(0, prefix.length + idx + delimiter.length));
-              continue;
-            }
-          }
-          contents.push(item);
-        }
-
         return xmlResponse(
-          xmlDocument({
-            name: 'ListBucketResult',
-            attributes: { xmlns: S3_XMLNS },
-            children: [
-              { name: 'Name', value: bucket },
-              { name: 'Prefix', value: prefix },
-              { name: 'KeyCount', value: String(contents.length + commonPrefixes.size) },
-              { name: 'MaxKeys', value: String(maxKeys) },
-              { name: 'IsTruncated', value: String(isTruncated) },
-              ...contents.map((item) => ({
-                name: 'Contents',
-                children: [
-                  { name: 'Key', value: item.key },
-                  { name: 'LastModified', value: item.mtime },
-                  { name: 'ETag', value: item.md5 ? `"${item.md5}"` : '' },
-                  { name: 'Size', value: String(item.size) },
-                  { name: 'StorageClass', value: 'STANDARD' },
-                ],
-              })),
-              ...[...commonPrefixes]
-                .sort((a, b) => a.localeCompare(b))
-                .map((prefixValue) => ({
-                  name: 'CommonPrefixes',
-                  children: [{ name: 'Prefix', value: prefixValue }],
-                })),
-              ...(nextToken ? [{ name: 'NextContinuationToken', value: nextToken }] : []),
-            ],
-          }),
+          listResultToXml(bucket, prefix, maxKeys, result, [
+            ...(result.nextContinuationToken
+              ? [{ name: 'NextContinuationToken', value: result.nextContinuationToken }]
+              : []),
+          ]),
         );
       }
       // ListObjects v1 (no list-type=2 param)
@@ -365,62 +306,26 @@ function createS3Handler() {
           Math.max(Number.parseInt(url.searchParams.get('max-keys') ?? '1000', 10) || 1000, 1),
           1000,
         );
-        const bucketDir = resolve(S3_ROOT, bucket);
+        let result: Awaited<ReturnType<typeof listObjects>>;
         try {
-          await stat(bucketDir);
-        } catch {
-          return s3Err(set, 404, 'NoSuchBucket', 'Bucket not found', pathname);
-        }
-        const all = (await walkObjects(bucketDir, bucket)).filter((item) =>
-          item.key.startsWith(prefix),
-        );
-        const filtered = marker ? all.filter((item) => item.key > marker) : all;
-        const page = filtered.slice(0, maxKeys);
-        const isTruncated = filtered.length > page.length;
-        const commonPrefixes = new Set<string>();
-        const contents: ObjectRow[] = [];
-        for (const item of page) {
-          if (delimiter) {
-            const rest = item.key.slice(prefix.length);
-            const idx = rest.indexOf(delimiter);
-            if (idx >= 0) {
-              commonPrefixes.add(item.key.slice(0, prefix.length + idx + delimiter.length));
-              continue;
-            }
-          }
-          contents.push(item);
+          result = await listObjects({
+            bucket,
+            prefix,
+            delimiter,
+            continuationToken: marker,
+            maxKeys,
+          });
+        } catch (err) {
+          if (err instanceof BucketError) return mapBucketError(set, err, pathname);
+          throw err;
         }
         return xmlResponse(
-          xmlDocument({
-            name: 'ListBucketResult',
-            attributes: { xmlns: S3_XMLNS },
-            children: [
-              { name: 'Name', value: bucket },
-              { name: 'Prefix', value: prefix },
-              { name: 'Marker', value: marker },
-              { name: 'MaxKeys', value: String(maxKeys) },
-              { name: 'IsTruncated', value: String(isTruncated) },
-              ...contents.map((item) => ({
-                name: 'Contents',
-                children: [
-                  { name: 'Key', value: item.key },
-                  { name: 'LastModified', value: item.mtime },
-                  { name: 'ETag', value: item.md5 ? `"${item.md5}"` : '' },
-                  { name: 'Size', value: String(item.size) },
-                  { name: 'StorageClass', value: 'STANDARD' },
-                ],
-              })),
-              ...[...commonPrefixes]
-                .sort((a, b) => a.localeCompare(b))
-                .map((prefixValue) => ({
-                  name: 'CommonPrefixes',
-                  children: [{ name: 'Prefix', value: prefixValue }],
-                })),
-              ...(isTruncated
-                ? [{ name: 'NextMarker', value: page[page.length - 1]?.key ?? '' }]
-                : []),
-            ],
-          }),
+          listResultToXml(bucket, prefix, maxKeys, result, [
+            { name: 'Marker', value: marker },
+            ...(result.isTruncated && result.nextContinuationToken
+              ? [{ name: 'NextMarker', value: result.nextContinuationToken }]
+              : []),
+          ]),
         );
       }
       return s3Err(set, 405, 'MethodNotAllowed', 'Method not allowed', pathname);
@@ -459,62 +364,35 @@ function createS3Handler() {
         if (srcKey.includes('\0') || srcKey.split('/').some((s) => s === '..' || s === '.')) {
           return s3Err(set, 400, 'InvalidArgument', 'Invalid copy source key', pathname);
         }
-        const srcRel = objectRel(srcBucket, srcKey);
+        let result: Awaited<ReturnType<typeof copyObject>>;
         try {
-          await openStream(srcRel);
-        } catch {
-          return s3Err(set, 404, 'NoSuchKey', 'Copy source not found', pathname);
+          result = await copyObject(srcBucket, srcKey, bucket, key);
+        } catch (err) {
+          if (err instanceof BucketError) {
+            if (err.code === 'not_found') {
+              return s3Err(set, 404, 'NoSuchKey', 'Copy source not found', pathname);
+            }
+            return mapBucketError(set, err, pathname, 'key');
+          }
+          throw err;
         }
-        const srcDbRow = db
-          .select({ md5: s3Object.md5 })
-          .from(s3Object)
-          .where(eq(s3Object.path, srcRel))
-          .get();
-        const srcMd5 = srcDbRow?.md5 ?? (await hashOnDisk(srcRel, 'md5'));
-        const srcAbs = resolve(DATA_ROOT, srcRel);
-        const destAbs = resolve(DATA_ROOT, rel);
-        await mkdir(dirname(destAbs), { recursive: true });
-        const tmp = `${destAbs}.tmp-${crypto.randomUUID().slice(0, 8)}`;
-        await copyFile(srcAbs, tmp);
-        await rename(tmp, destAbs);
-        const destStat = await stat(destAbs);
-        await db
-          .insert(s3Object)
-          .values({
-            path: rel,
-            bucket,
-            key,
-            size: destStat.size,
-            mtimeMs: Math.round(destStat.mtimeMs),
-            inode: Number(destStat.ino),
-            md5: srcMd5,
-          })
-          .onConflictDoUpdate({
-            target: s3Object.path,
-            set: {
-              size: destStat.size,
-              mtimeMs: Math.round(destStat.mtimeMs),
-              inode: Number(destStat.ino),
-              md5: srcMd5,
-            },
-          });
-        const lastModified = new Date(destStat.mtimeMs).toISOString();
+        const lastModified = new Date(result.mtimeMs).toISOString();
         return xmlResponse(
           xmlDocument({
             name: 'CopyObjectResult',
             attributes: { xmlns: S3_XMLNS },
             children: [
-              { name: 'ETag', value: `"${srcMd5}"` },
+              { name: 'ETag', value: `"${result.md5}"` },
               { name: 'LastModified', value: lastModified },
             ],
           }),
         );
       }
-      let result: { size: number; md5: string; mtimeMs: number; inode: number };
+      let result: Awaited<ReturnType<typeof putObject>>;
       try {
-        await mkdir(resolve(S3_ROOT, bucket), { recursive: true });
-        result = await writeUpload(rel, bodyStream(request));
+        result = await putObject(bucket, key, request);
       } catch (err) {
+        if (err instanceof BucketError) return mapBucketError(set, err, pathname, 'key');
         return s3Err(
           set,
           400,
@@ -523,26 +401,6 @@ function createS3Handler() {
           pathname,
         );
       }
-      await db
-        .insert(s3Object)
-        .values({
-          path: rel,
-          bucket,
-          key,
-          size: result.size,
-          mtimeMs: result.mtimeMs,
-          inode: result.inode,
-          md5: result.md5,
-        })
-        .onConflictDoUpdate({
-          target: s3Object.path,
-          set: {
-            size: result.size,
-            mtimeMs: result.mtimeMs,
-            inode: result.inode,
-            md5: result.md5,
-          },
-        });
       const mime = mimeFromName(basenameOf(key));
       if (isThumbnailable(mime)) {
         generateAndStoreThumbnail(resolve(DATA_ROOT, rel), rel, mime).catch(() => {});
@@ -560,14 +418,18 @@ function createS3Handler() {
       } catch {
         return s3Err(set, 404, 'NoSuchKey', 'Object not found', pathname);
       }
-      const dbRow = db
-        .select({ md5: s3Object.md5 })
-        .from(s3Object)
-        .where(eq(s3Object.path, rel))
-        .get();
-      const etag = dbRow?.md5
-        ? `"${dbRow.md5}"`
-        : `"${opened.stat.size}-${Math.round(opened.stat.mtimeMs)}"`;
+      let info: Awaited<ReturnType<typeof headObject>>;
+      try {
+        info = await headObject(bucket, key);
+      } catch {
+        info = {
+          key,
+          size: opened.stat.size,
+          mtimeMs: Math.round(opened.stat.mtimeMs),
+          md5: '',
+        };
+      }
+      const etag = info.md5 ? `"${info.md5}"` : `"${info.size}-${info.mtimeMs}"`;
       const contentType = mimeFromName(basenameOf(key));
       const headers = {
         'Content-Length': String(opened.stat.size),
@@ -592,7 +454,6 @@ function createS3Handler() {
         let start: number;
         let end: number;
         if (m[1] === undefined) {
-          // Suffix range: bytes=-N → last N bytes
           const suffixLen = Number.parseInt(m[2]!, 10);
           start = Math.max(0, opened.stat.size - suffixLen);
           end = opened.stat.size - 1;
@@ -616,18 +477,7 @@ function createS3Handler() {
     }
 
     if (request.method === 'DELETE') {
-      const bucketDir = resolve(S3_ROOT, bucket);
-      const absObject = resolve(S3_ROOT, bucket, key);
-      try {
-        await removeFile(rel);
-        await pruneEmptyParents(dirname(absObject), bucketDir);
-      } catch {
-        // DELETE is idempotent.
-      }
-      // Remove from DB regardless of whether the file existed on disk.
-      // Must be awaited — drizzle queries are lazy and otherwise never run,
-      // leaving orphaned object metadata behind.
-      await db.delete(s3Object).where(eq(s3Object.path, rel));
+      await deleteObject(bucket, key);
       return new Response(null, { status: 204 });
     }
 
