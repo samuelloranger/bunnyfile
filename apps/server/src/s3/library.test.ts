@@ -16,6 +16,7 @@ const [
     createPrefix,
     deleteBucket,
     deleteObject,
+    deletePrefix,
     headObject,
     listBuckets,
     listObjects,
@@ -153,5 +154,23 @@ describe('Bucket Library objects', () => {
     await expect(headObject('b2', 'y.txt')).rejects.toBeInstanceOf(BucketError);
     const { stream } = await openObjectStream('b2', 'z.txt');
     expect(await new Response(stream).text()).toBe('z');
+  });
+
+  test('moveObject same path is a no-op', async () => {
+    await createBucket('b');
+    await putObject('b', 'same.txt', new Blob(['keep']).stream());
+    const info = await moveObject('b', 'same.txt', 'b', 'same.txt');
+    expect(info.size).toBe(4);
+    expect(await new Response((await openObjectStream('b', 'same.txt')).stream).text()).toBe(
+      'keep',
+    );
+  });
+
+  test('deletePrefix removes empty folder marker', async () => {
+    await createBucket('b');
+    await createPrefix('b', 'empty');
+    expect((await listObjects({ bucket: 'b', delimiter: '/' })).prefixes).toContain('empty/');
+    await deletePrefix('b', 'empty/');
+    expect((await listObjects({ bucket: 'b', delimiter: '/' })).prefixes).not.toContain('empty/');
   });
 });

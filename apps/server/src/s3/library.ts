@@ -450,6 +450,10 @@ export async function moveObject(
   dstBucket: string,
   dstKey: string,
 ): Promise<ObjectInfo> {
+  if (srcBucket === dstBucket && srcKey === dstKey) {
+    // Same path: copy+delete would wipe the object. Treat as no-op.
+    return headObject(srcBucket, srcKey);
+  }
   const copied = await copyObject(srcBucket, srcKey, dstBucket, dstKey);
   try {
     await deleteObject(srcBucket, srcKey);
@@ -462,4 +466,25 @@ export async function moveObject(
     );
   }
   return copied;
+}
+
+/** Delete an empty prefix (folder). Fails if any non-marker objects remain under it. */
+export async function deletePrefix(bucket: string, prefix: string): Promise<void> {
+  assertBucketName(bucket);
+  const base = prefix.replace(/\/+$/, '');
+  if (!base) {
+    throw new BucketError('invalid_key', 'prefix must not be empty');
+  }
+  assertObjectKey(base);
+  await ensureBucketExists(bucket);
+  const under = (await walkObjects(bucket)).filter(
+    (item) => item.key === `${base}/.keep` || item.key.startsWith(`${base}/`),
+  );
+  const real = under.filter((item) => item.key !== `${base}/.keep` && !item.key.endsWith('/.keep'));
+  if (real.length > 0) {
+    throw new BucketError('bucket_not_empty', `prefix is not empty: ${base}/`);
+  }
+  for (const item of under) {
+    await deleteObject(bucket, item.key);
+  }
 }

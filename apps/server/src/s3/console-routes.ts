@@ -7,6 +7,7 @@ import {
   createPrefix,
   deleteBucket,
   deleteObject,
+  deletePrefix,
   listBuckets,
   listObjects,
   moveObject,
@@ -213,4 +214,23 @@ export const s3ConsoleRoutes = new Elysia({ name: 's3-console' })
         move: t.Optional(t.Boolean()),
       }),
     },
-  );
+  )
+  .delete('/api/s3-console/buckets/:bucket/prefixes', async ({ request, set, params }) => {
+    const session = await requireSession(request);
+    if (!session?.user) {
+      set.status = 401;
+      return { error: 'Unauthorized' };
+    }
+    const prefix = new URL(request.url).searchParams.get('prefix');
+    if (!prefix) {
+      set.status = 400;
+      return { error: 'prefix query parameter is required' };
+    }
+    try {
+      await deletePrefix(params.bucket, prefix);
+      set.status = 204;
+      return null;
+    } catch (err) {
+      return mapBucketError(err, set);
+    }
+  });

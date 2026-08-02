@@ -63,9 +63,37 @@ export function s3ObjectsQueryKey(bucket: string, prefix: string) {
 }
 
 export async function fetchObjects(bucket: string, prefix: string): Promise<ListObjectsResult> {
-  const qs = new URLSearchParams({ prefix, delimiter: '/' });
-  return json(
-    await fetch(`/api/s3-console/buckets/${encodeURIComponent(bucket)}/objects?${qs}`, {
+  const objects: ObjectInfo[] = [];
+  const prefixes = new Set<string>();
+  let continuationToken: string | undefined;
+  let guard = 0;
+  while (guard++ < 100) {
+    const qs = new URLSearchParams({ prefix, delimiter: '/' });
+    if (continuationToken) qs.set('continuationToken', continuationToken);
+    const page = await json<ListObjectsResult>(
+      await fetch(`/api/s3-console/buckets/${encodeURIComponent(bucket)}/objects?${qs}`, {
+        credentials: 'include',
+      }),
+    );
+    for (const o of page.objects) objects.push(o);
+    for (const p of page.prefixes) prefixes.add(p);
+    if (!page.isTruncated || !page.nextContinuationToken) {
+      return {
+        objects,
+        prefixes: [...prefixes].sort((a, b) => a.localeCompare(b)),
+        isTruncated: false,
+      };
+    }
+    continuationToken = page.nextContinuationToken;
+  }
+  throw new Error('Object listing exceeded page limit');
+}
+
+export async function deletePrefix(bucket: string, prefix: string): Promise<void> {
+  const qs = new URLSearchParams({ prefix });
+  await json(
+    await fetch(`/api/s3-console/buckets/${encodeURIComponent(bucket)}/prefixes?${qs}`, {
+      method: 'DELETE',
       credentials: 'include',
     }),
   );

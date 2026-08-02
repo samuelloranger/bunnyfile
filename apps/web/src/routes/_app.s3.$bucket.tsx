@@ -13,6 +13,7 @@ import {
   copyOrMoveObject,
   createPrefix,
   deleteObject,
+  deletePrefix,
   fetchBuckets,
   fetchObjects,
   isFolderMarkerKey,
@@ -67,6 +68,21 @@ function S3ObjectBrowserPage() {
       pushNotification({
         kind: 'error',
         title: 'Could not delete object',
+        body: err instanceof Error ? err.message : undefined,
+      });
+    },
+  });
+
+  const removeFolder = useMutation({
+    mutationFn: (folderPrefix: string) => deletePrefix(bucket, folderPrefix),
+    onSuccess: () => {
+      invalidate();
+      pushNotification({ kind: 'success', title: 'Folder deleted' });
+    },
+    onError: (err: unknown) => {
+      pushNotification({
+        kind: 'error',
+        title: 'Could not delete folder',
         body: err instanceof Error ? err.message : undefined,
       });
     },
@@ -222,14 +238,34 @@ function S3ObjectBrowserPage() {
           {prefixes.map((p) => {
             const label = p.slice(prefix.length).replace(/\/$/, '');
             return (
-              <li key={p}>
+              <li
+                key={p}
+                className="flex min-h-11 flex-wrap items-center gap-2 px-4 py-2.5 text-sm"
+              >
                 <button
                   type="button"
-                  className="flex min-h-11 w-full items-center px-4 py-2.5 text-left text-sm font-medium hover:bg-[hsl(var(--muted))]"
+                  className="min-w-0 flex-1 truncate text-left font-medium hover:underline"
                   onClick={() => navigate({ search: { prefix: p } })}
                 >
                   {label}/
                 </button>
+                <ConfirmDialog
+                  trigger={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-[hsl(var(--destructive))]"
+                      aria-label={`Delete folder ${label}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  }
+                  title="Delete folder?"
+                  description={`Delete empty folder “${label}/”? Folders with objects cannot be deleted.`}
+                  confirmLabel="Delete"
+                  tone="destructive"
+                  onConfirm={() => removeFolder.mutateAsync(p)}
+                />
               </li>
             );
           })}
