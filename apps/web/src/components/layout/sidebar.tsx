@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
+  Database,
   FolderOpen,
   type LucideIcon,
   Settings,
@@ -28,6 +29,7 @@ type NavItem = {
 const PRIMARY: NavItem[] = [
   { label: 'My files', to: '/files', icon: FolderOpen },
   { label: 'Shared', to: '/shared', icon: Share2 },
+  { label: 'S3', to: '/s3', icon: Database },
   { label: 'People', to: '/people', icon: Users },
 ];
 

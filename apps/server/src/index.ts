@@ -17,6 +17,7 @@ import { filesWatcher } from './files/watcher';
 import { drainUploads } from './inflight';
 import { prometheusMetrics, recordHttpRequest } from './metrics';
 import { accessKeyRoutes } from './s3/access-keys';
+import { s3ConsoleRoutes } from './s3/console-routes';
 import { s3Routes } from './s3/routes';
 import { allowShareRequest, requestIp } from './shares/rate-limit';
 import { sharesRoutes } from './shares/routes';
@@ -87,6 +88,7 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   .use(filesRoutes)
   .use(sharesRoutes)
   .use(accessKeyRoutes)
+  .use(s3ConsoleRoutes)
   .use(s3Routes)
   .use(filesCron)
   .use(filesWatcher)

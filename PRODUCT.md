@@ -38,7 +38,7 @@ Tagline (binding): **Files, shared. That's it.**
 
 ## Capabilities and Constraints
 
-**Confirmed capabilities:** browse/upload/download/delete/move, folders, previews, keyboard nav, drag-and-drop, upload progress, FTS search, trash, share links (password/expiry/download limits + QR), native email/password auth (admin/user roles, people management, profile/sessions), S3 API (SigV4, multipart, presigned URLs, per-user access keys), light/dark/system theme, OpenAPI at `/api/docs`.
+**Confirmed capabilities:** browse/upload/download/delete/move, folders, previews, keyboard nav, drag-and-drop, upload progress, FTS search, trash, share links (password/expiry/download limits + QR), native email/password auth (admin/user roles, people management, profile/sessions), S3 API (SigV4, multipart, presigned URLs, per-user access keys) plus in-app S3 console (buckets/objects/keys), light/dark/system theme, OpenAPI at `/api/docs`.
 
 **Hard non-goals (do not implement):**
 - Sync clients → Syncthing / rclone
