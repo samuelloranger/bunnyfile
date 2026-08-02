@@ -83,7 +83,7 @@ export function MarkdownViewer({ src }: { src: string }) {
               ol: ({ children }) => <ol className="mb-4 list-decimal pl-6">{children}</ol>,
               li: ({ children }) => <li className="mb-1">{children}</li>,
               blockquote: ({ children }) => (
-                <blockquote className="mb-4 border-l-4 border-[hsl(var(--border))] pl-4 text-[hsl(var(--muted-foreground))]">
+                <blockquote className="mb-4 border-l-2 border-[hsl(var(--border))] pl-4 text-[hsl(var(--muted-foreground))]">
                   {children}
                 </blockquote>
               ),

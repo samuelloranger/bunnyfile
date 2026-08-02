@@ -533,7 +533,7 @@ function FilesPage() {
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <p className="text-xs font-medium uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
             Workspace
@@ -541,19 +541,24 @@ function FilesPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Files</h1>
           <Breadcrumb path={path} q={q} mode={mode} />
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-0.5 mr-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="flex items-center rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-0.5"
+            role="group"
+            aria-label="View mode"
+          >
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={() => setViewMode('grid')}
               className={cn(
-                'size-8 !p-0 rounded-md transition-all duration-150',
+                'rounded-md transition-all duration-150',
                 viewMode === 'grid'
                   ? 'bg-[hsl(var(--surface))] shadow-sm text-[hsl(var(--primary))]'
                   : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
               )}
               aria-label="Grid view"
+              aria-pressed={viewMode === 'grid'}
             >
               <LayoutGrid className="size-4" />
             </Button>
@@ -562,12 +567,13 @@ function FilesPage() {
               size="icon-sm"
               onClick={() => setViewMode('list')}
               className={cn(
-                'size-8 !p-0 rounded-md transition-all duration-150',
+                'rounded-md transition-all duration-150',
                 viewMode === 'list'
                   ? 'bg-[hsl(var(--surface))] shadow-sm text-[hsl(var(--primary))]'
                   : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
               )}
               aria-label="List view"
+              aria-pressed={viewMode === 'list'}
             >
               <List className="size-4" />
             </Button>
@@ -627,6 +633,7 @@ function FilesPage() {
               placeholder={
                 mode === 'all' ? 'Search all files (2+ characters)' : 'Filter current folder'
               }
+              aria-label={mode === 'all' ? 'Search all files' : 'Filter current folder'}
               leftIcon={<Search />}
               className="max-w-sm"
             />
@@ -1324,7 +1331,7 @@ function FileRow({
               <a
                 href={downloadHref}
                 download={entry.name}
-                className="inline-flex size-8 items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
+                className="inline-flex size-10 items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] sm:size-8"
                 aria-label={`Download ${entry.name}`}
               >
                 <Download className="size-4" />
@@ -1657,7 +1664,7 @@ function DirectoryCard({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="size-8"
+                className="sm:size-8"
                 aria-label={`More actions for ${entry.name}`}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -1776,7 +1783,7 @@ function FileCard({
           <a
             href={downloadHref}
             download={entry.name}
-            className="inline-flex size-8 items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
+            className="inline-flex size-10 items-center justify-center rounded-md text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] sm:size-8"
             aria-label={`Download ${entry.name}`}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1787,7 +1794,7 @@ function FileCard({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="size-8"
+                className="sm:size-8"
                 aria-label={`More actions for ${entry.name}`}
                 onClick={(e) => e.stopPropagation()}
               >

@@ -3,6 +3,7 @@ import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { KeyRound, Mail } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { AuthCard, AuthShell } from '~/components/auth/auth-card';
+import { SplashScreen } from '~/components/layout/splash-screen';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -24,7 +25,8 @@ function LoginPage() {
   const [pending, setPending] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
 
-  if (setup.isLoading || session.isPending) return null;
+  if (setup.isLoading || session.isPending)
+    return <SplashScreen message="Checking your session…" />;
   if (setup.data?.needsSetup) return <Navigate to="/setup" />;
   if (session.data?.user) return <Navigate to="/files" search={FILES_HOME_SEARCH} />;
 
@@ -56,6 +58,7 @@ function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.currentTarget.value)}
               placeholder="you@example.com"
+              aria-describedby={error ? 'login-error' : undefined}
             />
           </div>
           <div className="space-y-1.5">
@@ -69,11 +72,16 @@ function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.currentTarget.value)}
               placeholder="••••••••"
+              aria-describedby={error ? 'login-error' : undefined}
             />
           </div>
 
           {error && (
-            <p className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] px-3 py-2 text-sm text-[hsl(var(--destructive))]">
+            <p
+              id="login-error"
+              role="alert"
+              className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] px-3 py-2 text-sm text-[hsl(var(--destructive))]"
+            >
               {error}
             </p>
           )}
@@ -81,17 +89,20 @@ function LoginPage() {
           <Button type="submit" className="w-full" size="lg" loading={pending}>
             Sign in
           </Button>
+        </form>
 
+        <div className="mt-4 space-y-2">
           <button
             type="button"
             className="w-full text-center text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
             onClick={() => setShowForgot((v) => !v)}
+            aria-expanded={showForgot}
           >
             Forgot password?
           </button>
 
           {showForgot && <ForgotPasswordForm prefillEmail={email} />}
-        </form>
+        </div>
       </AuthCard>
     </AuthShell>
   );
@@ -113,7 +124,10 @@ function ForgotPasswordForm({ prefillEmail }: { prefillEmail: string }) {
 
   if (status === 'done') {
     return (
-      <p className="rounded-md border border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--success))]">
+      <p
+        role="status"
+        className="rounded-md border border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--success))]"
+      >
         If that account exists, a password-reset link is on its way. Check your email.
       </p>
     );
@@ -121,24 +135,30 @@ function ForgotPasswordForm({ prefillEmail }: { prefillEmail: string }) {
 
   return (
     <div className="space-y-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-3">
-      <p className="text-xs text-[hsl(var(--muted-foreground))]">
+      <p id="forgot-hint" className="text-xs text-[hsl(var(--muted-foreground))]">
         Enter your email and we'll send a link to reset your password.
       </p>
-      <form onSubmit={handleReset} className="flex gap-2">
-        <Input
-          type="email"
-          required
-          value={resetEmail}
-          onChange={(e) => setResetEmail(e.currentTarget.value)}
-          placeholder="your@email.com"
-          className="flex-1"
-        />
+      <form onSubmit={handleReset} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Label htmlFor="forgot-email">Email for reset link</Label>
+          <Input
+            id="forgot-email"
+            type="email"
+            required
+            value={resetEmail}
+            onChange={(e) => setResetEmail(e.currentTarget.value)}
+            placeholder="your@email.com"
+            aria-describedby="forgot-hint"
+          />
+        </div>
         <Button type="submit" size="sm" loading={status === 'pending'} variant="outline">
-          Reset
+          Send reset link
         </Button>
       </form>
       {status === 'err' && (
-        <p className="text-xs text-[hsl(var(--destructive))]">Something went wrong.</p>
+        <p role="alert" className="text-xs text-[hsl(var(--destructive))]">
+          Couldn't send the reset email. Check the address and try again.
+        </p>
       )}
     </div>
   );

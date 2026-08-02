@@ -1,6 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Bell, LogOut, Menu, Monitor, Moon, Search, Sun, User } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar';
 import { Button } from '~/components/ui/button';
 import {
@@ -11,7 +11,6 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu';
 import { Input } from '~/components/ui/input';
@@ -32,6 +31,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [notifications, setNotifications] = useState(() => listNotifications());
+  const searchRef = useRef<HTMLInputElement>(null);
   const user = session.data?.user;
   const unread = notifications.filter((item) => !item.read).length;
   const initials = user?.name
@@ -48,6 +48,20 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   }
 
   useEffect(() => subscribeNotifications(() => setNotifications(listNotifications())), []);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName.toLowerCase();
+      if (tag === 'textarea' || target?.isContentEditable) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   function submitSearch() {
     const q = searchQuery.trim();
@@ -70,8 +84,11 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
 
       <div className="relative max-w-md flex-1">
         <Input
+          ref={searchRef}
+          id="topbar-search"
           type="search"
           placeholder="Search all files…"
+          aria-label="Search all files"
           leftIcon={<Search />}
           rightIcon={<Kbd>⌘K</Kbd>}
           value={searchQuery}
@@ -98,10 +115,13 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
             <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
               <Bell />
               {unread > 0 && (
-                <span
-                  aria-hidden
-                  className="absolute right-2 top-2 size-1.5 rounded-full bg-[hsl(var(--accent))]"
-                />
+                <>
+                  <span
+                    aria-hidden
+                    className="absolute right-2 top-2 size-1.5 rounded-full bg-[hsl(var(--accent))]"
+                  />
+                  <span className="sr-only">{unread} unread</span>
+                </>
               )}
             </Button>
           </DropdownMenuTrigger>
@@ -197,7 +217,6 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => navigate({ to: '/profile' })}>
               <User /> Profile
-              <DropdownMenuShortcut>⌘P</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem destructive onSelect={handleSignOut}>

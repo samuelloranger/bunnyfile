@@ -47,8 +47,9 @@ function NavLink({ item }: { item: NavItem }) {
   return (
     <Link
       to={item.to}
+      aria-current={active ? 'page' : undefined}
       className={cn(
-        'group relative flex h-9 items-center gap-3 rounded-md px-2.5 text-sm font-medium',
+        'group relative flex min-h-11 items-center gap-3 rounded-md px-2.5 text-sm font-medium sm:h-9 sm:min-h-0',
         'transition-colors duration-150',
         active
           ? 'bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]'
@@ -141,13 +142,25 @@ export function Sidebar({ className }: { className?: string }) {
       <div className="border-t border-[hsl(var(--border)/0.5)] p-3">
         <div className="rounded-xl border border-[hsl(var(--border)/0.5)] bg-[hsl(var(--surface-2)/0.4)] backdrop-blur-sm p-3">
           <p className="text-xs font-medium">Storage</p>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--muted)/0.5)]">
+          <div
+            className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--muted)/0.5)]"
+            role="progressbar"
+            aria-label="Storage used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(pct)}
+            aria-valuetext={
+              totalBytes
+                ? `${formatBytes(usedBytes)} of ${formatBytes(totalBytes)} used`
+                : `${formatBytes(usedBytes)} used`
+            }
+          >
             <div
               className="h-full rounded-full bg-gradient-to-r from-[hsl(var(--primary))] to-[hsl(var(--accent))]"
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="mt-1.5 text-[11px] text-[hsl(var(--muted-foreground))]">
+          <p className="mt-1.5 text-[11px] text-[hsl(var(--muted-foreground))]" aria-hidden>
             {formatBytes(usedBytes)}
             {totalBytes ? ` of ${formatBytes(totalBytes)}` : ''} used
           </p>
