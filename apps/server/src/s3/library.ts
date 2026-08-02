@@ -1,10 +1,12 @@
-import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { s3Object } from '../db/schema';
 import {
   createFileStream,
+  DATA_ROOT,
+  hashOnDisk,
   openStream,
   PathError,
   removeFile,
@@ -269,4 +271,189 @@ export async function deleteObject(bucket: string, key: string): Promise<void> {
     // DELETE is idempotent
   }
   await db.delete(s3Object).where(eq(s3Object.path, rel));
+}
+
+export type ListObjectsInput = {
+  bucket: string;
+  prefix?: string;
+  delimiter?: string;
+  continuationToken?: string;
+  maxKeys?: number;
+};
+
+export type ListObjectsResult = {
+  objects: ObjectInfo[];
+  prefixes: string[];
+  isTruncated: boolean;
+  nextContinuationToken?: string;
+};
+
+type WalkRow = { key: string; size: number; mtimeMs: number; md5: string };
+
+async function walkObjects(bucket: string): Promise<WalkRow[]> {
+  const bucketDir = join(S3_ROOT, bucket);
+  const dbRows = await db.select().from(s3Object).where(eq(s3Object.bucket, bucket));
+  const md5Map = new Map(dbRows.map((r) => [r.key, r.md5]));
+
+  const out: WalkRow[] = [];
+  const queue: Array<{ dir: string; prefix: string }> = [{ dir: bucketDir, prefix: '' }];
+  while (queue.length > 0) {
+    const { dir, prefix } = queue.shift()!;
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') && entry.name !== '.keep') continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const abs = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        queue.push({ dir: abs, prefix: rel });
+      } else if (entry.isFile()) {
+        let st: Awaited<ReturnType<typeof stat>>;
+        try {
+          st = await stat(abs);
+        } catch {
+          continue;
+        }
+        out.push({
+          key: rel,
+          size: st.size,
+          mtimeMs: Math.round(st.mtimeMs),
+          md5: md5Map.get(rel) ?? '',
+        });
+      }
+    }
+  }
+  return out.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+export async function listObjects(input: ListObjectsInput): Promise<ListObjectsResult> {
+  const {
+    bucket,
+    prefix = '',
+    delimiter = '',
+    continuationToken = '',
+    maxKeys: rawMax = 1000,
+  } = input;
+  await ensureBucketExists(bucket);
+  const maxKeys = Math.min(Math.max(rawMax || 1000, 1), 1000);
+  const all = (await walkObjects(bucket)).filter((item) => item.key.startsWith(prefix));
+  const filtered = continuationToken ? all.filter((item) => item.key > continuationToken) : all;
+  const page = filtered.slice(0, maxKeys);
+  const isTruncated = filtered.length > page.length;
+  const nextContinuationToken = isTruncated ? (page[page.length - 1]?.key ?? undefined) : undefined;
+  const commonPrefixes = new Set<string>();
+  const objects: ObjectInfo[] = [];
+  for (const item of page) {
+    if (delimiter) {
+      const rest = item.key.slice(prefix.length);
+      const idx = rest.indexOf(delimiter);
+      if (idx >= 0) {
+        commonPrefixes.add(item.key.slice(0, prefix.length + idx + delimiter.length));
+        continue;
+      }
+    }
+    objects.push({
+      key: item.key,
+      size: item.size,
+      mtimeMs: item.mtimeMs,
+      md5: item.md5,
+    });
+  }
+  return {
+    objects,
+    prefixes: [...commonPrefixes].sort((a, b) => a.localeCompare(b)),
+    isTruncated,
+    nextContinuationToken,
+  };
+}
+
+export async function createPrefix(bucket: string, prefix: string): Promise<ObjectInfo> {
+  assertBucketName(bucket);
+  const base = prefix.replace(/\/+$/, '');
+  if (!base) {
+    throw new BucketError('invalid_key', 'prefix must not be empty');
+  }
+  assertObjectKey(base);
+  // Trailing-slash keys cannot be stored via safeRelPath (it strips `/`).
+  // A visible `.keep` marker creates the prefix for delimiter listings.
+  return putObject(bucket, `${base}/.keep`, new Blob([]).stream());
+}
+
+export async function copyObject(
+  srcBucket: string,
+  srcKey: string,
+  dstBucket: string,
+  dstKey: string,
+): Promise<ObjectInfo> {
+  assertBucketName(srcBucket);
+  assertBucketName(dstBucket);
+  assertObjectKey(srcKey);
+  assertObjectKey(dstKey);
+  await ensureBucketExists(srcBucket);
+  const srcRel = objectRel(srcBucket, srcKey);
+  try {
+    await openStream(srcRel);
+  } catch {
+    throw new BucketError('not_found', `object not found: ${srcBucket}/${srcKey}`);
+  }
+  const srcDbRow = db
+    .select({ md5: s3Object.md5 })
+    .from(s3Object)
+    .where(eq(s3Object.path, srcRel))
+    .get();
+  const srcMd5 = srcDbRow?.md5 ?? (await hashOnDisk(srcRel, 'md5'));
+  const dstRel = objectRel(dstBucket, dstKey);
+  await mkdir(join(S3_ROOT, dstBucket), { recursive: true });
+  const srcAbs = resolve(DATA_ROOT, srcRel);
+  const destAbs = resolve(DATA_ROOT, dstRel);
+  await mkdir(dirname(destAbs), { recursive: true });
+  const tmp = `${destAbs}.tmp-${crypto.randomUUID().slice(0, 8)}`;
+  await copyFile(srcAbs, tmp);
+  await rename(tmp, destAbs);
+  const destStat = await stat(destAbs);
+  await db
+    .insert(s3Object)
+    .values({
+      path: dstRel,
+      bucket: dstBucket,
+      key: dstKey,
+      size: destStat.size,
+      mtimeMs: Math.round(destStat.mtimeMs),
+      inode: Number(destStat.ino),
+      md5: srcMd5,
+    })
+    .onConflictDoUpdate({
+      target: s3Object.path,
+      set: {
+        size: destStat.size,
+        mtimeMs: Math.round(destStat.mtimeMs),
+        inode: Number(destStat.ino),
+        md5: srcMd5,
+      },
+    });
+  return {
+    key: dstKey,
+    size: destStat.size,
+    mtimeMs: Math.round(destStat.mtimeMs),
+    md5: srcMd5,
+  };
+}
+
+export async function moveObject(
+  srcBucket: string,
+  srcKey: string,
+  dstBucket: string,
+  dstKey: string,
+): Promise<ObjectInfo> {
+  const copied = await copyObject(srcBucket, srcKey, dstBucket, dstKey);
+  try {
+    await deleteObject(srcBucket, srcKey);
+  } catch (err) {
+    throw new BucketError(
+      'not_found',
+      `copied to ${dstBucket}/${dstKey} but failed to delete source ${srcBucket}/${srcKey}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  return copied;
 }

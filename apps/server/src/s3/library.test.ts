@@ -11,11 +11,15 @@ process.env.BETTER_AUTH_SECRET = 'test-secret-for-s3-library';
 const [
   {
     BucketError,
+    copyObject,
     createBucket,
+    createPrefix,
     deleteBucket,
     deleteObject,
     headObject,
     listBuckets,
+    listObjects,
+    moveObject,
     openObjectStream,
     putObject,
   },
@@ -120,5 +124,32 @@ describe('Bucket Library objects', () => {
     await deleteObject('b', 'gone.txt');
     await expect(headObject('b', 'gone.txt')).rejects.toBeInstanceOf(BucketError);
     await deleteObject('b', 'gone.txt'); // idempotent
+  });
+
+  test('listObjects with delimiter returns prefixes', async () => {
+    await createBucket('b');
+    await putObject('b', 'docs/a.txt', new Blob(['a']).stream());
+    const listed = await listObjects({ bucket: 'b', prefix: '', delimiter: '/' });
+    expect(listed.prefixes).toContain('docs/');
+    expect(listed.objects.some((o) => o.key === 'docs/a.txt')).toBe(false);
+  });
+
+  test('createPrefix shows as empty folder via delimiter', async () => {
+    await createBucket('b');
+    await createPrefix('b', 'empty');
+    const listed = await listObjects({ bucket: 'b', delimiter: '/' });
+    expect(listed.prefixes).toContain('empty/');
+  });
+
+  test('copyObject and moveObject', async () => {
+    await createBucket('b1');
+    await createBucket('b2');
+    await putObject('b1', 'x.txt', new Blob(['z']).stream());
+    await copyObject('b1', 'x.txt', 'b2', 'y.txt');
+    expect((await headObject('b2', 'y.txt')).size).toBe(1);
+    await moveObject('b2', 'y.txt', 'b2', 'z.txt');
+    await expect(headObject('b2', 'y.txt')).rejects.toBeInstanceOf(BucketError);
+    const { stream } = await openObjectStream('b2', 'z.txt');
+    expect(await new Response(stream).text()).toBe('z');
   });
 });
