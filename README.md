@@ -104,7 +104,7 @@ region = us-east-1
 force_path_style = true
 ```
 
-Create per-user keys in the app under **Settings**, or set `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in the environment for a single global key.
+Create per-user keys in the app under **S3 → Access keys**, or set `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in the environment for a single global key. Browse and manage buckets in the **S3** nav without a CLI.
 
 Full client setup, supported operations, and known limitations: [`docs/s3-compatibility.md`](./docs/s3-compatibility.md).
 
