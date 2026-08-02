@@ -3,6 +3,7 @@ import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { KeyRound, Mail, ShieldCheck, User } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { AuthCard, AuthShell } from '~/components/auth/auth-card';
+import { SplashScreen } from '~/components/layout/splash-screen';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -23,7 +24,7 @@ function SetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  if (setup.isLoading) return null;
+  if (setup.isLoading) return <SplashScreen message="Preparing setup…" />;
   if (setup.data && !setup.data.needsSetup) return <Navigate to="/login" />;
 
   async function handleSubmit(e: FormEvent) {
@@ -102,7 +103,10 @@ function SetupPage() {
           </div>
 
           {error && (
-            <p className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] px-3 py-2 text-sm text-[hsl(var(--destructive))]">
+            <p
+              role="alert"
+              className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] px-3 py-2 text-sm text-[hsl(var(--destructive))]"
+            >
               {error}
             </p>
           )}

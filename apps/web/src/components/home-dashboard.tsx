@@ -43,7 +43,7 @@ export function HomeDashboard() {
           </Button>
           <Button rightIcon={<ArrowUpRight />} asChild>
             <Link to="/files" search={FILES_HOME_SEARCH}>
-              Upload
+              Go to files
             </Link>
           </Button>
         </div>
@@ -69,6 +69,7 @@ export function HomeDashboard() {
           }
           hint={health.data ? `v${health.data.version}` : undefined}
           tone={health.data?.status === 'ok' ? 'success' : 'warning'}
+          live
         />
         <StatCard
           icon={<Clock />}
@@ -76,6 +77,7 @@ export function HomeDashboard() {
           value={health.data ? `${health.data.uptimeSeconds}s` : '—'}
           hint="since last boot"
           tone="accent"
+          live
         />
       </section>
 
@@ -140,12 +142,14 @@ function StatCard({
   value,
   hint,
   tone,
+  live = false,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   hint?: string | undefined;
   tone: Tone;
+  live?: boolean;
 }) {
   const toneBg: Record<Tone, string> = {
     primary: 'bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]',
@@ -162,7 +166,7 @@ function StatCard({
         >
           {icon}
         </div>
-        <Badge variant="outline">live</Badge>
+        {live && <Badge variant="outline">live</Badge>}
       </div>
       <p className="mt-4 text-xs font-medium uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
         {label}

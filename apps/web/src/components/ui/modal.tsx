@@ -15,7 +15,7 @@ export const ModalOverlay = forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-50 bg-black/50 backdrop-blur-sm',
+      'fixed inset-0 z-50 bg-[hsl(var(--foreground)/0.45)] backdrop-blur-sm',
       'data-[state=open]:animate-[overlay-in_200ms_ease-out]',
       'data-[state=closed]:animate-[overlay-out_150ms_ease-in]',
       className,
@@ -61,7 +61,7 @@ export const ModalContent = forwardRef<HTMLDivElement, ModalContentProps>(
           <DialogPrimitive.Close
             aria-label="Close"
             className={cn(
-              'absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-md',
+              'absolute right-3 top-3 inline-flex size-10 items-center justify-center rounded-md sm:size-8',
               'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]',
               'transition-colors duration-150',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]',

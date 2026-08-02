@@ -31,11 +31,11 @@ const buttonVariants = cva(
         link: 'bg-transparent text-[hsl(var(--primary))] underline-offset-4 hover:underline p-0 h-auto',
       },
       size: {
-        sm: 'h-8 px-3 text-xs',
-        md: 'h-9 px-4',
-        lg: 'h-11 px-6 text-base',
-        icon: 'h-9 w-9 p-0',
-        'icon-sm': 'h-8 w-8 p-0',
+        sm: 'h-10 min-h-11 px-3 text-xs sm:h-8 sm:min-h-0',
+        md: 'h-11 min-h-11 px-4 sm:h-9 sm:min-h-0',
+        lg: 'h-12 min-h-11 px-6 text-base sm:h-11',
+        icon: 'size-11 min-h-11 min-w-11 p-0 sm:size-9 sm:min-h-0 sm:min-w-0',
+        'icon-sm': 'size-10 min-h-10 min-w-10 p-0 sm:size-8 sm:min-h-0 sm:min-w-0',
       },
     },
     defaultVariants: {
