@@ -542,11 +542,8 @@ function FilesPage() {
           <Breadcrumb path={path} q={q} mode={mode} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div
-            className="flex items-center rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-0.5"
-            role="group"
-            aria-label="View mode"
-          >
+          <fieldset className="m-0 flex min-w-0 items-center rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-0.5">
+            <legend className="sr-only">View mode</legend>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -577,7 +574,7 @@ function FilesPage() {
             >
               <List className="size-4" />
             </Button>
-          </div>
+          </fieldset>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

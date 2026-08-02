@@ -167,92 +167,11 @@
       scroll-behavior: auto;
     }
 
-    /* Decorative / looping motion stops; state feedback keeps a short opacity fade. */
+    /* Decorative / looping motion stops; keyframe overrides live after defaults below. */
     .animate-spin,
     .animate-pulse {
       /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override utility animation classes */
       animation: none !important;
-    }
-
-    @keyframes overlay-in {
-      from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
-    }
-    @keyframes overlay-out {
-      from {
-        opacity: 1;
-      }
-      to {
-        opacity: 0;
-      }
-    }
-    @keyframes content-in {
-      from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
-    }
-    @keyframes content-out {
-      from {
-        opacity: 1;
-      }
-      to {
-        opacity: 0;
-      }
-    }
-    @keyframes drawer-in-right {
-      from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
-    }
-    @keyframes drawer-out-right {
-      from {
-        opacity: 1;
-      }
-      to {
-        opacity: 0;
-      }
-    }
-    @keyframes drawer-in-left {
-      from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
-    }
-    @keyframes drawer-out-left {
-      from {
-        opacity: 1;
-      }
-      to {
-        opacity: 0;
-      }
-    }
-    @keyframes menu-in {
-      from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
-    }
-    @keyframes menu-out {
-      from {
-        opacity: 1;
-      }
-      to {
-        opacity: 0;
-      }
     }
   }
 }
@@ -344,5 +263,89 @@
   to {
     opacity: 0;
     scale: 0.98;
+  }
+}
+
+/* Must follow the default @keyframes so reduced-motion wins cascade order. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes overlay-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes content-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes content-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes drawer-in-right {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes drawer-out-right {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes drawer-in-left {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes drawer-out-left {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes menu-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
   }
 }
