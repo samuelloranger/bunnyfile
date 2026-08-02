@@ -3,13 +3,7 @@ import { resolve } from 'node:path';
 import { Elysia } from 'elysia';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
-import {
-  createFileStream,
-  DATA_ROOT,
-  openStream,
-  readRange,
-  S3_ROOT,
-} from '../files/store';
+import { createFileStream, DATA_ROOT, openStream, readRange, S3_ROOT } from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { lookupS3SecretKey } from './access-keys';
 import {

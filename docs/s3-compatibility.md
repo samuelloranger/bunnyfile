@@ -19,6 +19,16 @@ The **Files browser and the S3 API are separate namespaces**: objects written wi
 
 On upgrade from pre-v2 layouts, the first boot moves legacy user entries into `files/` and renames `.trash`/`.shares`/`.multipart` (idempotent; writes `.bunnyfile-layout-v2`).
 
+## Web console
+
+Signed-in users can manage the same `s3/` tree from the app under **S3** (`/s3`):
+
+- List / create / delete buckets (delete requires empty)
+- Browse objects with prefix folders, upload, download, delete, copy/move
+- Manage access keys at **S3 → Access keys** (`/s3/keys`)
+
+The console uses session cookies (`/api/s3-console/*`), not SigV4. Empty folders are represented by a `.keep` marker object under the prefix (trailing-slash keys cannot be stored on the local filesystem path layer).
+
 ## Supported operations
 
 | Operation | Notes |
@@ -46,7 +56,7 @@ Two credential sources work at the same time:
    - `S3_REGION` (default `us-east-1`)
 
 2. **Per-user access keys** (recommended for multi-user):
-   - Create keys in the web app under **Settings → S3 Access Keys**
+   - Create keys in the web app under **S3 → Access keys**
    - Keys use the `BFAK…` prefix; the secret is shown once at creation
 
 All S3 requests must use **path-style** URLs: `/api/s3/{bucket}/{key}`.

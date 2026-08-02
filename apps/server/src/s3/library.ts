@@ -57,15 +57,14 @@ async function hasAnyFile(dir: string): Promise<boolean> {
   const queue = [dir];
   while (queue.length > 0) {
     const current = queue.shift()!;
-    let entries: Awaited<ReturnType<typeof readdir>>;
     try {
-      entries = await readdir(current, { withFileTypes: true });
+      const entries = await readdir(current, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile()) return true;
+        if (entry.isDirectory()) queue.push(resolve(current, entry.name));
+      }
     } catch {
       return false;
-    }
-    for (const entry of entries) {
-      if (entry.isFile()) return true;
-      if (entry.isDirectory()) queue.push(resolve(current, entry.name));
     }
   }
   return false;
@@ -284,15 +283,15 @@ export type ListObjectsInput = {
   bucket: string;
   prefix?: string;
   delimiter?: string;
-  continuationToken?: string;
-  maxKeys?: number;
+  continuationToken?: string | undefined;
+  maxKeys?: number | undefined;
 };
 
 export type ListObjectsResult = {
   objects: ObjectInfo[];
   prefixes: string[];
   isTruncated: boolean;
-  nextContinuationToken?: string;
+  nextContinuationToken?: string | undefined;
 };
 
 type WalkRow = { key: string; size: number; mtimeMs: number; md5: string };

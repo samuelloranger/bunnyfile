@@ -40,6 +40,11 @@ beforeEach(async () => {
   await mkdir(S3_ROOT, { recursive: true });
 });
 
+function expectBucketErrorCode(err: unknown, code: string) {
+  expect(err).toBeInstanceOf(BucketError);
+  expect((err as { code: string }).code).toBe(code);
+}
+
 describe('Bucket Library buckets', () => {
   test('createBucket + listBuckets', async () => {
     const info = await createBucket('photos');
@@ -60,8 +65,7 @@ describe('Bucket Library buckets', () => {
       await createBucket('dup');
       expect.unreachable();
     } catch (err) {
-      expect(err).toBeInstanceOf(BucketError);
-      expect((err as BucketError).code).toBe('bucket_exists');
+      expectBucketErrorCode(err, 'bucket_exists');
     }
   });
 
@@ -79,8 +83,7 @@ describe('Bucket Library buckets', () => {
       await deleteBucket('full');
       expect.unreachable();
     } catch (err) {
-      expect(err).toBeInstanceOf(BucketError);
-      expect((err as BucketError).code).toBe('bucket_not_empty');
+      expectBucketErrorCode(err, 'bucket_not_empty');
     }
   });
 
@@ -89,8 +92,7 @@ describe('Bucket Library buckets', () => {
       await deleteBucket('nope');
       expect.unreachable();
     } catch (err) {
-      expect(err).toBeInstanceOf(BucketError);
-      expect((err as BucketError).code).toBe('not_found');
+      expectBucketErrorCode(err, 'not_found');
     }
   });
 });

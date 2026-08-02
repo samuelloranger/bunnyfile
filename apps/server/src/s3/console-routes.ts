@@ -83,15 +83,23 @@ export const s3ConsoleRoutes = new Elysia({ name: 's3-console' })
     }
     const url = new URL(request.url);
     try {
-      return await listObjects({
+      const input: {
+        bucket: string;
+        prefix: string;
+        delimiter: string;
+        continuationToken?: string;
+        maxKeys?: number;
+      } = {
         bucket: params.bucket,
         prefix: url.searchParams.get('prefix') ?? '',
         delimiter: url.searchParams.get('delimiter') ?? '/',
-        continuationToken: url.searchParams.get('continuationToken') ?? undefined,
-        maxKeys: url.searchParams.has('maxKeys')
-          ? Number.parseInt(url.searchParams.get('maxKeys')!, 10)
-          : undefined,
-      });
+      };
+      const token = url.searchParams.get('continuationToken');
+      if (token) input.continuationToken = token;
+      if (url.searchParams.has('maxKeys')) {
+        input.maxKeys = Number.parseInt(url.searchParams.get('maxKeys')!, 10);
+      }
+      return await listObjects(input);
     } catch (err) {
       return mapBucketError(err, set);
     }

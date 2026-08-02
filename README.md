@@ -22,7 +22,7 @@ If you need those, Nextcloud and Seafile are great. BunnyFile wins by being less
 ## The pitch
 
 - **Fast:** cold start <500ms, idle RAM <100MB
-- **Compatible:** first-class S3 API — rclone, aws-cli, restic, kopia, Cyberduck all just work
+- **Compatible:** first-class S3 API — rclone, aws-cli, restic, kopia, Cyberduck all just work — plus an in-app **S3** console for buckets and keys
 - **Minimal:** Bun + SQLite + local filesystem. No Redis, no MariaDB, no Elasticsearch
 - **Reliable:** upload progress feedback in the SPA plus byte-exact integrity testing
 
