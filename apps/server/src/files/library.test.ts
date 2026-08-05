@@ -9,6 +9,8 @@ process.env.DB_PATH = join(testRoot, 'test.sqlite');
 process.env.DATA_DIR = join(testRoot, 'data');
 process.env.BETTER_AUTH_SECRET = 'test-secret';
 
+const compensateTestPath = join(import.meta.dir, 'library-compensate-isolated.ts');
+
 const [{ runMigrations }, { db }, { fileIndex, user }, library, { openStream }, search] =
   await Promise.all([
     import('../db/migrate'),
@@ -32,13 +34,28 @@ describe('File Library — upload / createLibraryFolder', () => {
   beforeAll(async () => {
     await mkdir(process.env.DATA_DIR!, { recursive: true });
     runMigrations();
-    await db.insert(user).values({
-      id: 'lib-user',
-      name: 'Lib User',
-      email: 'lib@example.com',
-      emailVerified: true,
-      role: 'admin',
+    await db
+      .insert(user)
+      .values({
+        id: 'lib-user',
+        name: 'Lib User',
+        email: 'lib@example.com',
+        emailVerified: true,
+        role: 'admin',
+      })
+      .onConflictDoNothing();
+  });
+
+  test('upload compensates bytes, index, and search when metadata fails after index upsert', async () => {
+    const proc = Bun.spawnSync(['bun', 'test', compensateTestPath], {
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
+    if (proc.exitCode !== 0) {
+      console.error(proc.stdout.toString());
+      console.error(proc.stderr.toString());
+    }
+    expect(proc.exitCode).toBe(0);
   });
 
   test('upload writes bytes, index row, and search hit', async () => {

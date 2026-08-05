@@ -4,7 +4,7 @@ import { fileIndex } from '../db/schema';
 import { broadcastFilesChanged } from './events';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
-import { upsertFileSearch } from './search';
+import { deleteFileSearch, upsertFileSearch } from './search';
 import { absFromRelOrThrow, createFolder, removeFile, writeUpload } from './store';
 import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
 
@@ -57,6 +57,11 @@ export async function upload(
     broadcastFilesChanged();
   } catch (err) {
     await removeFile(rel).catch(() => {});
+    await db
+      .delete(fileIndex)
+      .where(eq(fileIndex.path, rel))
+      .catch(() => {});
+    await deleteFileSearch(rel).catch(() => {});
     throw err;
   }
   if (isThumbnailable(mime)) {
