@@ -1,16 +1,18 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { fileIndex, thumbnail } from '../db/schema';
+import { fileIndex, thumbnail, trashItem } from '../db/schema';
 import { broadcastFilesChanged } from './events';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
-import { deleteFileSearch, upsertFileSearch } from './search';
+import { deleteFileSearch, deleteFileSearchPrefix, upsertFileSearch } from './search';
 import {
   absFromRelOrThrow,
   createFolder,
   moveFile,
+  movePathToTrash,
   openStream,
   removeFile,
+  restorePathFromTrash,
   writeUpload,
 } from './store';
 import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
@@ -145,4 +147,62 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
     throw err;
   }
   return { path: toRel };
+}
+
+export async function trashFile(rel: string, deletedByUserId: string): Promise<{ ok: true }> {
+  const existingRow = db.select().from(fileIndex).where(eq(fileIndex.path, rel)).get();
+  await openStream(rel);
+  const id = crypto.randomUUID();
+  const moved = await movePathToTrash(rel, id);
+  try {
+    await db.insert(trashItem).values({
+      id,
+      originalPath: rel,
+      trashPath: moved.trashPath,
+      kind: 'file',
+      size: existingRow?.size ?? moved.size,
+      mime: existingRow?.mime ?? mimeFromName(basenameOf(rel)),
+      deletedByUserId,
+    });
+    await db.delete(fileIndex).where(eq(fileIndex.path, rel));
+    await deleteFileSearch(rel);
+    await db.delete(thumbnail).where(eq(thumbnail.path, rel));
+    broadcastFilesChanged();
+  } catch (err) {
+    await restorePathFromTrash(moved.trashPath, rel).catch(() => {});
+    throw err;
+  }
+  return { ok: true };
+}
+
+export async function trashFolder(rel: string, deletedByUserId: string): Promise<{ ok: true }> {
+  const id = crypto.randomUUID();
+  const moved = await movePathToTrash(rel, id);
+  const [summary] = await db
+    .select({ size: sql<number>`coalesce(sum(${fileIndex.size}), 0)` })
+    .from(fileIndex)
+    .where(sql`${fileIndex.path} = ${rel} OR ${fileIndex.path} LIKE ${`${rel}/%`}`);
+  try {
+    await db.insert(trashItem).values({
+      id,
+      originalPath: rel,
+      trashPath: moved.trashPath,
+      kind: 'dir',
+      size: summary?.size ?? null,
+      mime: null,
+      deletedByUserId,
+    });
+    await db
+      .delete(fileIndex)
+      .where(sql`${fileIndex.path} = ${rel} OR ${fileIndex.path} LIKE ${`${rel}/%`}`);
+    await deleteFileSearchPrefix(rel);
+    await db
+      .delete(thumbnail)
+      .where(sql`${thumbnail.path} = ${rel} OR ${thumbnail.path} LIKE ${`${rel}/%`}`);
+    broadcastFilesChanged();
+  } catch (err) {
+    await restorePathFromTrash(moved.trashPath, rel).catch(() => {});
+    throw err;
+  }
+  return { ok: true };
 }

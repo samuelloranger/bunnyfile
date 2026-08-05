@@ -124,3 +124,37 @@ describe('File Library — move', () => {
     expect(hits.some((h) => h.path === to)).toBe(true);
   });
 });
+
+describe('File Library — trash', () => {
+  test('trashFile removes from index and search; restore path kept in trash_item', async () => {
+    const { trashItem } = await import('../db/schema');
+    const path = `tr-${crypto.randomUUID().slice(0, 8)}.txt`;
+    await library.upload(path, streamFromText('bye'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'lib-user',
+    });
+    await library.trashFile(path, 'lib-user');
+
+    expect(db.select().from(fileIndex).where(eq(fileIndex.path, path)).get()).toBeUndefined();
+    const row = db.select().from(trashItem).where(eq(trashItem.originalPath, path)).get();
+    expect(row?.kind).toBe('file');
+    expect(row?.deletedByUserId).toBe('lib-user');
+    await expect(openStream(path)).rejects.toBeInstanceOf((await import('./store')).PathError);
+  });
+
+  test('trashFolder removes subtree index rows', async () => {
+    const { trashItem } = await import('../db/schema');
+    const folder = `tf-${crypto.randomUUID().slice(0, 8)}`;
+    const child = `${folder}/child.txt`;
+    await library.createLibraryFolder(folder);
+    await library.upload(child, streamFromText('nested'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'lib-user',
+    });
+    await library.trashFolder(folder, 'lib-user');
+
+    expect(db.select().from(fileIndex).where(eq(fileIndex.path, child)).get()).toBeUndefined();
+    const row = db.select().from(trashItem).where(eq(trashItem.originalPath, folder)).get();
+    expect(row?.kind).toBe('dir');
+  });
+});
