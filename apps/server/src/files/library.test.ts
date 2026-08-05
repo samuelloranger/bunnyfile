@@ -88,3 +88,26 @@ describe('File Library — upload / createLibraryFolder', () => {
     expect(dirs).toContain(path);
   });
 });
+
+describe('File Library — move', () => {
+  test('move updates bytes, index path, and search', async () => {
+    const from = `mv-from-${crypto.randomUUID().slice(0, 8)}.txt`;
+    const to = `mv-to-${crypto.randomUUID().slice(0, 8)}.txt`;
+    await library.upload(from, streamFromText('move me'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'lib-user',
+    });
+    const result = await library.move(from, to);
+    expect(result.path).toBe(to);
+
+    await expect(openStream(from)).rejects.toBeInstanceOf((await import('./store')).PathError);
+    const { stat } = await openStream(to);
+    expect(stat.size).toBe(7);
+
+    expect(db.select().from(fileIndex).where(eq(fileIndex.path, from)).get()).toBeUndefined();
+    expect(db.select().from(fileIndex).where(eq(fileIndex.path, to)).get()?.size).toBe(7);
+
+    const hits = await search.searchFiles(to.slice(0, 8), 20);
+    expect(hits.some((h) => h.path === to)).toBe(true);
+  });
+});

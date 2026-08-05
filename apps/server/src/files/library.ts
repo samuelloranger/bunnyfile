@@ -1,11 +1,18 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
-import { fileIndex } from '../db/schema';
+import { fileIndex, thumbnail } from '../db/schema';
 import { broadcastFilesChanged } from './events';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
 import { deleteFileSearch, upsertFileSearch } from './search';
-import { absFromRelOrThrow, createFolder, removeFile, writeUpload } from './store';
+import {
+  absFromRelOrThrow,
+  createFolder,
+  moveFile,
+  openStream,
+  removeFile,
+  writeUpload,
+} from './store';
 import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
 
 export type LibraryActor = {
@@ -74,4 +81,44 @@ export async function createLibraryFolder(rel: string): Promise<{ path: string }
   await createFolder(rel);
   broadcastFilesChanged();
   return { path: rel };
+}
+
+export async function move(fromRel: string, toRel: string): Promise<{ path: string }> {
+  const existingRow = await db
+    .select()
+    .from(fileIndex)
+    .where(eq(fileIndex.path, fromRel))
+    .then((r) => r[0]);
+
+  await moveFile(fromRel, toRel);
+
+  try {
+    const { stat: newStat } = await openStream(toRel);
+    const mime = existingRow?.mime ?? mimeFromName(basenameOf(toRel));
+
+    await db.delete(fileIndex).where(eq(fileIndex.path, fromRel));
+    await deleteFileSearch(fromRel);
+    await db.insert(fileIndex).values({
+      path: toRel,
+      size: newStat.size,
+      mtimeMs: Math.round(newStat.mtimeMs),
+      inode: Number(newStat.ino),
+      sha256: existingRow?.sha256 ?? null,
+      mime,
+      uploadedByUserId: existingRow?.uploadedByUserId ?? null,
+    });
+    await upsertFileSearch(toRel);
+
+    const thumb = db.select().from(thumbnail).where(eq(thumbnail.path, fromRel)).get();
+    if (thumb) {
+      await db.delete(thumbnail).where(eq(thumbnail.path, fromRel));
+      await db.insert(thumbnail).values({ ...thumb, path: toRel });
+    }
+
+    broadcastFilesChanged();
+  } catch (err) {
+    await moveFile(toRel, fromRel).catch(() => {});
+    throw err;
+  }
+  return { path: toRel };
 }
