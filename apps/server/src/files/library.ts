@@ -178,11 +178,11 @@ export async function trashFile(rel: string, deletedByUserId: string): Promise<{
 export async function trashFolder(rel: string, deletedByUserId: string): Promise<{ ok: true }> {
   const id = crypto.randomUUID();
   const moved = await movePathToTrash(rel, id);
-  const [summary] = await db
-    .select({ size: sql<number>`coalesce(sum(${fileIndex.size}), 0)` })
-    .from(fileIndex)
-    .where(sql`${fileIndex.path} = ${rel} OR ${fileIndex.path} LIKE ${`${rel}/%`}`);
   try {
+    const [summary] = await db
+      .select({ size: sql<number>`coalesce(sum(${fileIndex.size}), 0)` })
+      .from(fileIndex)
+      .where(sql`${fileIndex.path} = ${rel} OR ${fileIndex.path} LIKE ${`${rel}/%`}`);
     await db.insert(trashItem).values({
       id,
       originalPath: rel,
