@@ -56,7 +56,7 @@ function PeoplePage() {
   const users = useQuery(usersQuery);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="space-y-6">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-medium uppercase tracking-wider text-[hsl(var(--muted-foreground))]">

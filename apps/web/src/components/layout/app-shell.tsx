@@ -27,7 +27,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className="flex min-w-0 flex-1 flex-col z-10">
             <Topbar onMenuClick={() => setMobileOpen(true)} />
-            <main className="flex-1 overflow-y-auto bg-transparent relative z-0">{children}</main>
+            <main className="flex-1 overflow-y-auto bg-transparent relative z-0">
+              {/*
+                Single source of truth for page width and gutters. Routes render
+                their content directly and never re-declare `mx-auto max-w-*`,
+                so the frame cannot drift from one page to the next.
+              */}
+              <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">{children}</div>
+            </main>
           </div>
 
           {/* Ambient background glow matching the brand colors */}

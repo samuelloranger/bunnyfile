@@ -13,7 +13,7 @@ function SettingsPage() {
   const usage = useQuery(storageUsageQuery());
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <div>
       <h1 className="text-xl font-semibold">Settings</h1>
 
       <section className="mt-8">

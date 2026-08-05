@@ -168,7 +168,7 @@ function S3ObjectBrowserPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <div>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Link
           to="/s3"

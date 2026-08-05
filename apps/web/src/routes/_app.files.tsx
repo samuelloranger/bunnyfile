@@ -528,7 +528,7 @@ function FilesPage() {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: page-wide drop zone; overlay is announced separately
     <div
-      className="relative mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 lg:px-8"
+      className="relative space-y-6"
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
