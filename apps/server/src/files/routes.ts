@@ -1,28 +1,33 @@
 import { stat, statfs } from 'node:fs/promises';
-import { desc, eq, inArray, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from '../auth/auth';
 import { db } from '../db';
 import { fileIndex, thumbnail, trashItem } from '../db/schema';
-import { addSseClient, broadcastFilesChanged, removeSseClient } from './events';
+import { addSseClient, removeSseClient } from './events';
+import {
+  createLibraryFolder,
+  emptyTrash,
+  LibraryError,
+  move,
+  remove,
+  restore,
+  trashFile,
+  trashFolder,
+  upload,
+} from './library';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
 import { scan } from './scanner';
-import { deleteFileSearch, deleteFileSearchPrefix, searchFiles, upsertFileSearch } from './search';
+import { searchFiles } from './search';
 import {
   absFromRelOrThrow,
   createFileStream,
-  createFolder,
   DATA_ROOT,
   listImmediateDirectories,
-  moveFile,
-  movePathToTrash,
   openStream,
   PathError,
   readRange,
-  removeTrashPath,
-  restorePathFromTrash,
-  writeUpload,
 } from './store';
 import { generateAndStoreThumbnail, isThumbnailable } from './thumbnail';
 import { userRel } from './user-path';
@@ -63,11 +68,39 @@ type RecentFileEntry = {
   mtimeMs: number;
 };
 
-function ownsTrashItem(
-  row: { deletedByUserId: string | null },
-  session: { user: { id: string; role?: string | null | undefined } },
-) {
-  return session.user.role === 'admin' || row.deletedByUserId === session.user.id;
+function mapMutationError(
+  err: unknown,
+  set: { status: number },
+): { error: string } | { error: 'not found' } | { error: 'trashed item missing' } {
+  if (err instanceof LibraryError) {
+    if (err.code === 'not_found') {
+      set.status = 404;
+      return { error: 'not found' };
+    }
+    if (err.code === 'exists') {
+      set.status = 409;
+      return { error: err.message };
+    }
+    if (err.code === 'trashed_missing') {
+      set.status = 404;
+      return { error: 'trashed item missing' };
+    }
+    set.status = 400;
+    return { error: err.message };
+  }
+  if (err instanceof PathError) {
+    if (err.code === 'not_found') {
+      set.status = 404;
+      return { error: 'not found' };
+    }
+    if (err.code === 'exists') {
+      set.status = 409;
+      return { error: err.message };
+    }
+    set.status = 400;
+    return { error: err.message };
+  }
+  throw err;
 }
 
 function escapeLike(s: string): string {
@@ -298,13 +331,11 @@ export const filesRoutes = new Elysia({ name: 'files' })
         return { error: 'invalid path' as const };
       }
       try {
-        await createFolder(path);
-        broadcastFilesChanged();
+        await createLibraryFolder(path);
         return { ok: true as const, path };
       } catch (err) {
-        if (err instanceof PathError) {
-          set.status = 400;
-          return { error: err.message };
+        if (err instanceof PathError || err instanceof LibraryError) {
+          return mapMutationError(err, set);
         }
         set.status = 500;
         return { error: err instanceof Error ? err.message : String(err) };
@@ -331,38 +362,10 @@ export const filesRoutes = new Elysia({ name: 'files' })
         return { error: 'invalid path' as const };
       }
       try {
-        const id = crypto.randomUUID();
-        const moved = await movePathToTrash(path, id);
-        const [summary] = await db
-          .select({ size: sql<number>`coalesce(sum(${fileIndex.size}), 0)` })
-          .from(fileIndex)
-          .where(sql`${fileIndex.path} = ${path} OR ${fileIndex.path} LIKE ${`${path}/%`}`);
-
-        await db.insert(trashItem).values({
-          id,
-          originalPath: path,
-          trashPath: moved.trashPath,
-          kind: 'dir',
-          size: summary?.size ?? null,
-          mime: null,
-          deletedByUserId: s.user.id,
-        });
-        await db
-          .delete(fileIndex)
-          .where(sql`${fileIndex.path} = ${path} OR ${fileIndex.path} LIKE ${`${path}/%`}`);
-        await deleteFileSearchPrefix(path);
-        broadcastFilesChanged();
+        await trashFolder(path, s.user.id);
         return { ok: true as const };
       } catch (err) {
-        if (err instanceof PathError) {
-          if (err.code === 'not_found') {
-            set.status = 404;
-            return { error: 'not found' as const };
-          }
-          set.status = 400;
-          return { error: err.message };
-        }
-        throw err;
+        return mapMutationError(err, set);
       }
     },
     {
@@ -424,7 +427,6 @@ export const filesRoutes = new Elysia({ name: 'files' })
         return { error: 'unauthorized' as const };
       }
 
-      const file = body.file;
       const target = userRel(body.path);
       if (!target) {
         set.status = 400;
@@ -436,51 +438,13 @@ export const filesRoutes = new Elysia({ name: 'files' })
       // to reason about for drag-drop flows.
 
       try {
-        const stream = file.stream();
-        const info = await writeUpload(target, stream);
-        // Insert or update the index row immediately — no need to wait for
-        // the next scan.
-        const mime = file.type || mimeFromName(basenameOf(target));
-        const existing = await db.select().from(fileIndex).where(eq(fileIndex.path, target));
-        if (existing.length > 0) {
-          await db
-            .update(fileIndex)
-            .set({
-              size: info.size,
-              mtimeMs: info.mtimeMs,
-              inode: info.inode,
-              sha256: info.sha256,
-              mime,
-              uploadedByUserId: s.user.id,
-              indexedAt: new Date(),
-            })
-            .where(eq(fileIndex.path, target));
-        } else {
-          await db.insert(fileIndex).values({
-            path: target,
-            size: info.size,
-            mtimeMs: info.mtimeMs,
-            inode: info.inode,
-            sha256: info.sha256,
-            mime,
-            uploadedByUserId: s.user.id,
-          });
-        }
-        broadcastFilesChanged();
-        await upsertFileSearch(target);
-        if (isThumbnailable(mime)) {
-          generateAndStoreThumbnail(absFromRelOrThrow(target), target, mime).catch(() => {});
-        }
-        return {
-          path: target,
-          size: info.size,
-          sha256: info.sha256,
-          mime,
-        };
+        return await upload(target, body.file.stream(), {
+          mime: body.file.type || undefined,
+          uploadedByUserId: s.user.id,
+        });
       } catch (err) {
-        if (err instanceof PathError) {
-          set.status = 400;
-          return { error: err.message };
+        if (err instanceof PathError || err instanceof LibraryError) {
+          return mapMutationError(err, set);
         }
         set.status = 500;
         return { error: err instanceof Error ? err.message : String(err) };
@@ -684,47 +648,14 @@ export const filesRoutes = new Elysia({ name: 'files' })
       return { error: 'unauthorized' as const };
     }
 
-    const row = db.select().from(trashItem).where(eq(trashItem.id, params.id)).get();
-    if (!row || !ownsTrashItem(row, s)) {
-      set.status = 404;
-      return { error: 'not found' as const };
-    }
-
     try {
-      await restorePathFromTrash(row.trashPath, row.originalPath);
-      if (row.kind === 'file') {
-        const { stat: restoredStat } = await openStream(row.originalPath);
-        const mime = row.mime ?? mimeFromName(basenameOf(row.originalPath));
-        await db.insert(fileIndex).values({
-          path: row.originalPath,
-          size: restoredStat.size,
-          mtimeMs: Math.round(restoredStat.mtimeMs),
-          inode: Number(restoredStat.ino),
-          sha256: null,
-          mime,
-          uploadedByUserId: row.deletedByUserId,
-        });
-        await upsertFileSearch(row.originalPath);
-      } else {
-        await scan();
-      }
-      await db.delete(trashItem).where(eq(trashItem.id, row.id));
-      broadcastFilesChanged();
-      return { ok: true as const, path: row.originalPath };
+      const { path: restoredPath } = await restore(params.id, {
+        userId: s.user.id,
+        role: s.user.role,
+      });
+      return { ok: true as const, path: restoredPath };
     } catch (err) {
-      if (err instanceof PathError) {
-        if (err.code === 'exists') {
-          set.status = 409;
-          return { error: err.message };
-        }
-        if (err.code === 'not_found') {
-          set.status = 404;
-          return { error: 'trashed item missing' as const };
-        }
-        set.status = 400;
-        return { error: err.message };
-      }
-      throw err;
+      return mapMutationError(err, set);
     }
   })
 
@@ -735,15 +666,12 @@ export const filesRoutes = new Elysia({ name: 'files' })
       return { error: 'unauthorized' as const };
     }
 
-    const row = db.select().from(trashItem).where(eq(trashItem.id, params.id)).get();
-    if (!row || !ownsTrashItem(row, s)) {
-      set.status = 404;
-      return { error: 'not found' as const };
+    try {
+      await remove(params.id, { userId: s.user.id, role: s.user.role });
+      return { ok: true as const };
+    } catch (err) {
+      return mapMutationError(err, set);
     }
-
-    await removeTrashPath(row.trashPath);
-    await db.delete(trashItem).where(eq(trashItem.id, row.id));
-    return { ok: true as const };
   })
 
   .delete('/api/trash', async ({ request, set }) => {
@@ -753,20 +681,8 @@ export const filesRoutes = new Elysia({ name: 'files' })
       return { error: 'unauthorized' as const };
     }
 
-    const rows = await db
-      .select()
-      .from(trashItem)
-      .where(s.user.role === 'admin' ? undefined : eq(trashItem.deletedByUserId, s.user.id));
-    await Promise.all(rows.map((row) => removeTrashPath(row.trashPath)));
-    if (rows.length > 0) {
-      await db.delete(trashItem).where(
-        inArray(
-          trashItem.id,
-          rows.map((row) => row.id),
-        ),
-      );
-    }
-    return { ok: true as const, removed: rows.length };
+    const { removed } = await emptyTrash({ userId: s.user.id, role: s.user.role });
+    return { ok: true as const, removed };
   })
 
   .post(
@@ -816,47 +732,10 @@ export const filesRoutes = new Elysia({ name: 'files' })
         return { error: 'invalid path' as const };
       }
       try {
-        // Read existing row before moving (to preserve metadata)
-        const existingRow = await db
-          .select()
-          .from(fileIndex)
-          .where(eq(fileIndex.path, path))
-          .then((r) => r[0]);
-
-        await moveFile(path, newPath);
-
-        // Stat the destination directly — no full scan needed
-        const { stat: newStat } = await openStream(newPath);
-        const mime = existingRow?.mime ?? mimeFromName(basenameOf(newPath));
-
-        await db.delete(fileIndex).where(eq(fileIndex.path, path));
-        await deleteFileSearch(path);
-        await db.insert(fileIndex).values({
-          path: newPath,
-          size: newStat.size,
-          mtimeMs: Math.round(newStat.mtimeMs),
-          inode: Number(newStat.ino),
-          sha256: existingRow?.sha256 ?? null,
-          mime,
-          uploadedByUserId: existingRow?.uploadedByUserId ?? null,
-        });
-        await upsertFileSearch(newPath);
-        broadcastFilesChanged();
-        return { ok: true as const, path: newPath };
+        const { path: movedPath } = await move(path, newPath);
+        return { ok: true as const, path: movedPath };
       } catch (err) {
-        if (err instanceof PathError) {
-          if (err.code === 'not_found') {
-            set.status = 404;
-            return { error: 'not found' as const };
-          }
-          if (err.code === 'exists') {
-            set.status = 409;
-            return { error: err.message };
-          }
-          set.status = 400;
-          return { error: err.message };
-        }
-        throw err;
+        return mapMutationError(err, set);
       }
     },
     {
@@ -881,33 +760,10 @@ export const filesRoutes = new Elysia({ name: 'files' })
         return { error: 'invalid path' as const };
       }
       try {
-        const existingRow = db.select().from(fileIndex).where(eq(fileIndex.path, path)).get();
-        await openStream(path);
-        const id = crypto.randomUUID();
-        const moved = await movePathToTrash(path, id);
-        await db.insert(trashItem).values({
-          id,
-          originalPath: path,
-          trashPath: moved.trashPath,
-          kind: 'file',
-          size: existingRow?.size ?? moved.size,
-          mime: existingRow?.mime ?? mimeFromName(basenameOf(path)),
-          deletedByUserId: s.user.id,
-        });
-        await db.delete(fileIndex).where(eq(fileIndex.path, path));
-        await deleteFileSearch(path);
-        broadcastFilesChanged();
+        await trashFile(path, s.user.id);
         return { ok: true as const };
       } catch (err) {
-        if (err instanceof PathError) {
-          if (err.code === 'not_found') {
-            set.status = 404;
-            return { error: 'not found' as const };
-          }
-          set.status = 400;
-          return { error: err.message };
-        }
-        throw err;
+        return mapMutationError(err, set);
       }
     },
     {
