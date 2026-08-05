@@ -1,9 +1,10 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { fileIndex, thumbnail, trashItem } from '../db/schema';
 import { broadcastFilesChanged } from './events';
 import { mimeFromName } from './mime';
 import { basenameOf } from './paths';
+import { scan } from './scanner';
 import { deleteFileSearch, deleteFileSearchPrefix, upsertFileSearch } from './search';
 import {
   absFromRelOrThrow,
@@ -11,7 +12,9 @@ import {
   moveFile,
   movePathToTrash,
   openStream,
+  PathError,
   removeFile,
+  removeTrashPath,
   restorePathFromTrash,
   writeUpload,
 } from './store';
@@ -21,6 +24,19 @@ export type LibraryActor = {
   userId: string;
   role?: string | null;
 };
+
+export class LibraryError extends Error {
+  constructor(
+    public code: 'not_found' | 'forbidden' | 'exists' | 'trashed_missing',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function ownsTrashItem(row: { deletedByUserId: string | null }, actor: LibraryActor): boolean {
+  return actor.role === 'admin' || row.deletedByUserId === actor.userId;
+}
 
 export type UploadResult = {
   path: string;
@@ -205,4 +221,72 @@ export async function trashFolder(rel: string, deletedByUserId: string): Promise
     throw err;
   }
   return { ok: true };
+}
+
+export async function restore(trashId: string, actor: LibraryActor): Promise<{ path: string }> {
+  const row = db.select().from(trashItem).where(eq(trashItem.id, trashId)).get();
+  if (!row || !ownsTrashItem(row, actor)) {
+    throw new LibraryError('not_found', 'not found');
+  }
+
+  try {
+    await restorePathFromTrash(row.trashPath, row.originalPath);
+    if (row.kind === 'file') {
+      const { stat: restoredStat } = await openStream(row.originalPath);
+      const mime = row.mime ?? mimeFromName(basenameOf(row.originalPath));
+      await db.insert(fileIndex).values({
+        path: row.originalPath,
+        size: restoredStat.size,
+        mtimeMs: Math.round(restoredStat.mtimeMs),
+        inode: Number(restoredStat.ino),
+        sha256: null,
+        mime,
+        uploadedByUserId: row.deletedByUserId,
+      });
+      await upsertFileSearch(row.originalPath);
+    } else {
+      await scan();
+    }
+    await db.delete(trashItem).where(eq(trashItem.id, row.id));
+    broadcastFilesChanged();
+    return { path: row.originalPath };
+  } catch (err) {
+    if (err instanceof PathError) {
+      if (err.code === 'exists') {
+        throw new LibraryError('exists', err.message);
+      }
+      if (err.code === 'not_found') {
+        throw new LibraryError('trashed_missing', 'trashed item missing');
+      }
+    }
+    throw err;
+  }
+}
+
+export async function remove(trashId: string, actor: LibraryActor): Promise<{ ok: true }> {
+  const row = db.select().from(trashItem).where(eq(trashItem.id, trashId)).get();
+  if (!row || !ownsTrashItem(row, actor)) {
+    throw new LibraryError('not_found', 'not found');
+  }
+
+  await removeTrashPath(row.trashPath);
+  await db.delete(trashItem).where(eq(trashItem.id, row.id));
+  return { ok: true };
+}
+
+export async function emptyTrash(actor: LibraryActor): Promise<{ removed: number }> {
+  const rows = await db
+    .select()
+    .from(trashItem)
+    .where(actor.role === 'admin' ? undefined : eq(trashItem.deletedByUserId, actor.userId));
+  await Promise.all(rows.map((row) => removeTrashPath(row.trashPath)));
+  if (rows.length > 0) {
+    await db.delete(trashItem).where(
+      inArray(
+        trashItem.id,
+        rows.map((row) => row.id),
+      ),
+    );
+  }
+  return { removed: rows.length };
 }

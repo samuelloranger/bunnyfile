@@ -158,3 +158,36 @@ describe('File Library — trash', () => {
     expect(row?.kind).toBe('dir');
   });
 });
+
+describe('File Library — restore / remove', () => {
+  test('restore file brings bytes and index back', async () => {
+    const { trashItem } = await import('../db/schema');
+    const path = `rs-${crypto.randomUUID().slice(0, 8)}.txt`;
+    await library.upload(path, streamFromText('back'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'lib-user',
+    });
+    await library.trashFile(path, 'lib-user');
+    const tid = db.select().from(trashItem).where(eq(trashItem.originalPath, path)).get()!.id;
+
+    const result = await library.restore(tid, { userId: 'lib-user', role: 'admin' });
+    expect(result.path).toBe(path);
+    const { stat } = await openStream(path);
+    expect(stat.size).toBe(4);
+    expect(db.select().from(fileIndex).where(eq(fileIndex.path, path)).get()?.size).toBe(4);
+  });
+
+  test('remove permanently deletes trash bytes and row', async () => {
+    const { trashItem } = await import('../db/schema');
+    const path = `rm-${crypto.randomUUID().slice(0, 8)}.txt`;
+    await library.upload(path, streamFromText('gone'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'lib-user',
+    });
+    await library.trashFile(path, 'lib-user');
+    const tid = db.select().from(trashItem).where(eq(trashItem.originalPath, path)).get()!.id;
+
+    await library.remove(tid, { userId: 'lib-user', role: 'admin' });
+    expect(db.select().from(trashItem).where(eq(trashItem.id, tid)).get()).toBeUndefined();
+  });
+});
