@@ -68,9 +68,11 @@ type RecentFileEntry = {
   mtimeMs: number;
 };
 
+type MutationErrorSet = { status?: number | string };
+
 function mapMutationError(
   err: unknown,
-  set: { status: number },
+  set: MutationErrorSet,
 ): { error: string } | { error: 'not found' } | { error: 'trashed item missing' } {
   if (err instanceof LibraryError) {
     if (err.code === 'not_found') {
@@ -109,6 +111,13 @@ function escapeLike(s: string): string {
 
 async function callerFromRequest(request: Request) {
   return auth.api.getSession({ headers: request.headers });
+}
+
+function libraryActor(user: { id: string; role?: string | null | undefined }): {
+  userId: string;
+  role?: string | null;
+} {
+  return user.role === undefined ? { userId: user.id } : { userId: user.id, role: user.role };
 }
 
 /**
@@ -439,7 +448,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
       try {
         return await upload(target, body.file.stream(), {
-          mime: body.file.type || undefined,
+          ...(body.file.type ? { mime: body.file.type } : {}),
           uploadedByUserId: s.user.id,
         });
       } catch (err) {
@@ -649,10 +658,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
     }
 
     try {
-      const { path: restoredPath } = await restore(params.id, {
-        userId: s.user.id,
-        role: s.user.role,
-      });
+      const { path: restoredPath } = await restore(params.id, libraryActor(s.user));
       return { ok: true as const, path: restoredPath };
     } catch (err) {
       return mapMutationError(err, set);
@@ -667,7 +673,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
     }
 
     try {
-      await remove(params.id, { userId: s.user.id, role: s.user.role });
+      await remove(params.id, libraryActor(s.user));
       return { ok: true as const };
     } catch (err) {
       return mapMutationError(err, set);
@@ -681,7 +687,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
       return { error: 'unauthorized' as const };
     }
 
-    const { removed } = await emptyTrash({ userId: s.user.id, role: s.user.role });
+    const { removed } = await emptyTrash(libraryActor(s.user));
     return { ok: true as const, removed };
   })
 
