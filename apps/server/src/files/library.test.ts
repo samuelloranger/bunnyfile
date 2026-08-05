@@ -1,0 +1,73 @@
+import { beforeAll, describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
+
+const testRoot = await mkdtemp(join(tmpdir(), 'bunnyfile-file-library-'));
+process.env.DB_PATH = join(testRoot, 'test.sqlite');
+process.env.DATA_DIR = join(testRoot, 'data');
+process.env.BETTER_AUTH_SECRET = 'test-secret';
+
+const [{ runMigrations }, { db }, { fileIndex, user }, library, { openStream }, search] =
+  await Promise.all([
+    import('../db/migrate'),
+    import('../db'),
+    import('../db/schema'),
+    import('./library'),
+    import('./store'),
+    import('./search'),
+  ]);
+
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(c) {
+      c.enqueue(new TextEncoder().encode(text));
+      c.close();
+    },
+  });
+}
+
+describe('File Library — upload / createLibraryFolder', () => {
+  beforeAll(async () => {
+    await mkdir(process.env.DATA_DIR!, { recursive: true });
+    runMigrations();
+    await db.insert(user).values({
+      id: 'lib-user',
+      name: 'Lib User',
+      email: 'lib@example.com',
+      emailVerified: true,
+      role: 'admin',
+    });
+  });
+
+  test('upload writes bytes, index row, and search hit', async () => {
+    const path = `up-${crypto.randomUUID().slice(0, 8)}.txt`;
+    const result = await library.upload(path, streamFromText('hello library'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'lib-user',
+    });
+    expect(result.path).toBe(path);
+    expect(result.size).toBe(13);
+    expect(result.sha256).toHaveLength(64);
+
+    const { stat } = await openStream(path);
+    expect(stat.size).toBe(13);
+
+    const row = db.select().from(fileIndex).where(eq(fileIndex.path, path)).get();
+    expect(row?.size).toBe(13);
+    expect(row?.uploadedByUserId).toBe('lib-user');
+
+    const hits = await search.searchFiles(path.slice(0, 8), 20);
+    expect(hits.some((h) => h.path === path)).toBe(true);
+  });
+
+  test('createLibraryFolder makes listing-visible empty dir', async () => {
+    const path = `dir-${crypto.randomUUID().slice(0, 8)}`;
+    const result = await library.createLibraryFolder(path);
+    expect(result.path).toBe(path);
+    const { listImmediateDirectories } = await import('./store');
+    const dirs = await listImmediateDirectories('');
+    expect(dirs).toContain(path);
+  });
+});
