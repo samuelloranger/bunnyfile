@@ -118,6 +118,30 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
     broadcastFilesChanged();
   } catch (err) {
     await moveFile(toRel, fromRel).catch(() => {});
+    await db
+      .delete(fileIndex)
+      .where(eq(fileIndex.path, toRel))
+      .catch(() => {});
+    await deleteFileSearch(toRel).catch(() => {});
+    const thumbAtTo = db.select().from(thumbnail).where(eq(thumbnail.path, toRel)).get();
+    if (thumbAtTo) {
+      await db.delete(thumbnail).where(eq(thumbnail.path, toRel));
+      await db.insert(thumbnail).values({ ...thumbAtTo, path: fromRel });
+    }
+    const fromIndex = db.select().from(fileIndex).where(eq(fileIndex.path, fromRel)).get();
+    if (!fromIndex && existingRow) {
+      const { stat: restoredStat } = await openStream(fromRel);
+      await db.insert(fileIndex).values({
+        path: fromRel,
+        size: restoredStat.size,
+        mtimeMs: Math.round(restoredStat.mtimeMs),
+        inode: Number(restoredStat.ino),
+        sha256: existingRow.sha256,
+        mime: existingRow.mime,
+        uploadedByUserId: existingRow.uploadedByUserId,
+      });
+      await upsertFileSearch(fromRel);
+    }
     throw err;
   }
   return { path: toRel };

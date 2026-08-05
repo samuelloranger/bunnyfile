@@ -10,6 +10,7 @@ process.env.DATA_DIR = join(testRoot, 'data');
 process.env.BETTER_AUTH_SECRET = 'test-secret';
 
 const compensateTestPath = join(import.meta.dir, 'library-compensate-isolated.ts');
+const moveCompensateTestPath = join(import.meta.dir, 'library-move-compensate-isolated.ts');
 
 const [{ runMigrations }, { db }, { fileIndex, user }, library, { openStream }, search] =
   await Promise.all([
@@ -90,6 +91,18 @@ describe('File Library — upload / createLibraryFolder', () => {
 });
 
 describe('File Library — move', () => {
+  test('move compensates bytes and index when metadata fails after rename', async () => {
+    const proc = Bun.spawnSync(['bun', 'test', moveCompensateTestPath], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (proc.exitCode !== 0) {
+      console.error(proc.stdout.toString());
+      console.error(proc.stderr.toString());
+    }
+    expect(proc.exitCode).toBe(0);
+  });
+
   test('move updates bytes, index path, and search', async () => {
     const from = `mv-from-${crypto.randomUUID().slice(0, 8)}.txt`;
     const to = `mv-to-${crypto.randomUUID().slice(0, 8)}.txt`;
