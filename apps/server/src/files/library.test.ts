@@ -37,13 +37,22 @@ describe('File Library — upload / createLibraryFolder', () => {
     runMigrations();
     await db
       .insert(user)
-      .values({
-        id: 'lib-user',
-        name: 'Lib User',
-        email: 'lib@example.com',
-        emailVerified: true,
-        role: 'admin',
-      })
+      .values([
+        {
+          id: 'lib-user',
+          name: 'Lib User',
+          email: 'lib@example.com',
+          emailVerified: true,
+          role: 'admin',
+        },
+        {
+          id: 'other-user',
+          name: 'Other User',
+          email: 'other@example.com',
+          emailVerified: true,
+          role: 'user',
+        },
+      ])
       .onConflictDoNothing();
   });
 
@@ -189,5 +198,44 @@ describe('File Library — restore / remove', () => {
 
     await library.remove(tid, { userId: 'lib-user', role: 'admin' });
     expect(db.select().from(trashItem).where(eq(trashItem.id, tid)).get()).toBeUndefined();
+  });
+
+  test('restore rejects another user trash row as not_found', async () => {
+    const { trashItem } = await import('../db/schema');
+    const path = `rs-own-${crypto.randomUUID().slice(0, 8)}.txt`;
+    await library.upload(path, streamFromText('private'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'other-user',
+    });
+    await library.trashFile(path, 'other-user');
+    const tid = db.select().from(trashItem).where(eq(trashItem.originalPath, path)).get()!.id;
+
+    try {
+      await library.restore(tid, { userId: 'lib-user', role: 'user' });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(library.LibraryError);
+      expect(err).toMatchObject({ code: 'not_found' });
+    }
+  });
+
+  test('remove rejects another user trash row as not_found', async () => {
+    const { trashItem } = await import('../db/schema');
+    const path = `rm-own-${crypto.randomUUID().slice(0, 8)}.txt`;
+    await library.upload(path, streamFromText('private'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'other-user',
+    });
+    await library.trashFile(path, 'other-user');
+    const tid = db.select().from(trashItem).where(eq(trashItem.originalPath, path)).get()!.id;
+
+    try {
+      await library.remove(tid, { userId: 'lib-user', role: 'user' });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(library.LibraryError);
+      expect(err).toMatchObject({ code: 'not_found' });
+    }
+    expect(db.select().from(trashItem).where(eq(trashItem.id, tid)).get()).toBeDefined();
   });
 });

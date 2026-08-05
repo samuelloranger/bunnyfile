@@ -52,9 +52,10 @@ export async function upload(
 ): Promise<UploadResult> {
   const info = await writeUpload(rel, stream);
   const mime = opts.mime || mimeFromName(basenameOf(rel));
+  const existing = await db.select().from(fileIndex).where(eq(fileIndex.path, rel));
+  const isNewPath = existing.length === 0;
   try {
-    const existing = await db.select().from(fileIndex).where(eq(fileIndex.path, rel));
-    if (existing.length > 0) {
+    if (!isNewPath) {
       await db
         .update(fileIndex)
         .set({
@@ -81,12 +82,14 @@ export async function upload(
     await upsertFileSearch(rel);
     broadcastFilesChanged();
   } catch (err) {
-    await removeFile(rel).catch(() => {});
-    await db
-      .delete(fileIndex)
-      .where(eq(fileIndex.path, rel))
-      .catch(() => {});
-    await deleteFileSearch(rel).catch(() => {});
+    if (isNewPath) {
+      await removeFile(rel).catch(() => {});
+      await db
+        .delete(fileIndex)
+        .where(eq(fileIndex.path, rel))
+        .catch(() => {});
+      await deleteFileSearch(rel).catch(() => {});
+    }
     throw err;
   }
   if (isThumbnailable(mime)) {
@@ -141,24 +144,28 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
       .where(eq(fileIndex.path, toRel))
       .catch(() => {});
     await deleteFileSearch(toRel).catch(() => {});
-    const thumbAtTo = db.select().from(thumbnail).where(eq(thumbnail.path, toRel)).get();
-    if (thumbAtTo) {
-      await db.delete(thumbnail).where(eq(thumbnail.path, toRel));
-      await db.insert(thumbnail).values({ ...thumbAtTo, path: fromRel });
-    }
-    const fromIndex = db.select().from(fileIndex).where(eq(fileIndex.path, fromRel)).get();
-    if (!fromIndex && existingRow) {
-      const { stat: restoredStat } = await openStream(fromRel);
-      await db.insert(fileIndex).values({
-        path: fromRel,
-        size: restoredStat.size,
-        mtimeMs: Math.round(restoredStat.mtimeMs),
-        inode: Number(restoredStat.ino),
-        sha256: existingRow.sha256,
-        mime: existingRow.mime,
-        uploadedByUserId: existingRow.uploadedByUserId,
-      });
-      await upsertFileSearch(fromRel);
+    try {
+      const thumbAtTo = db.select().from(thumbnail).where(eq(thumbnail.path, toRel)).get();
+      if (thumbAtTo) {
+        await db.delete(thumbnail).where(eq(thumbnail.path, toRel));
+        await db.insert(thumbnail).values({ ...thumbAtTo, path: fromRel });
+      }
+      const fromIndex = db.select().from(fileIndex).where(eq(fileIndex.path, fromRel)).get();
+      if (!fromIndex && existingRow) {
+        const { stat: restoredStat } = await openStream(fromRel);
+        await db.insert(fileIndex).values({
+          path: fromRel,
+          size: restoredStat.size,
+          mtimeMs: Math.round(restoredStat.mtimeMs),
+          inode: Number(restoredStat.ino),
+          sha256: existingRow.sha256,
+          mime: existingRow.mime,
+          uploadedByUserId: existingRow.uploadedByUserId,
+        });
+        await upsertFileSearch(fromRel);
+      }
+    } catch {
+      // Best-effort metadata revert; never mask the original failure.
     }
     throw err;
   }
