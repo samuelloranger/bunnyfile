@@ -83,7 +83,7 @@ function S3KeysPage() {
   });
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <div>
       <Link
         to="/s3"
         className="inline-flex items-center gap-1 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"

@@ -81,7 +81,7 @@ function TrashPage() {
   });
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <div>
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold">Trash</h1>

@@ -188,6 +188,24 @@ export async function openStream(rel: string) {
   return { path, stat: st };
 }
 
+/**
+ * Does `rel` currently exist on disk (file or directory)?
+ *
+ * Callers that need to know whether they *created* a path — rather than
+ * overwrote one — must ask the filesystem, not `file_index`: a file can be on
+ * disk without an index row (dropped in out-of-band, or added since the last
+ * scan). Treating such a file as "new" and deleting it during compensation
+ * would destroy user data.
+ */
+export async function pathExists(rel: string): Promise<boolean> {
+  try {
+    await stat(absFromRelOrThrow(rel));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function readRange(path: string, start: number, end: number): ReadableStream<Uint8Array> {
   // `end` is inclusive (HTTP Range semantics); Blob.slice end is exclusive.
   // Bun's Blob stream applies backpressure, so a slow client can't make the

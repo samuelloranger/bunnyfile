@@ -43,7 +43,7 @@ function ProfilePage() {
   if (!user) return null;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="space-y-8">
       <header className="flex items-center gap-5">
         <Avatar size="xl">
           {user.image && <AvatarImage src={user.image} alt="" />}

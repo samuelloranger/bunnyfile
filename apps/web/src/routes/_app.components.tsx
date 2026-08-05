@@ -72,7 +72,7 @@ function ComponentsPage() {
   const [visibility, setVisibility] = useState<string>('public');
 
   return (
-    <div className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="space-y-10">
       <header className="space-y-1">
         <p className="text-xs font-medium uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
           Design system
