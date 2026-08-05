@@ -13,6 +13,7 @@ import {
   movePathToTrash,
   openStream,
   PathError,
+  pathExists,
   removeFile,
   removeTrashPath,
   restorePathFromTrash,
@@ -50,12 +51,20 @@ export async function upload(
   stream: ReadableStream<Uint8Array>,
   opts: { mime?: string; uploadedByUserId: string },
 ): Promise<UploadResult> {
+  // Two independent questions, deliberately not conflated:
+  //  - `createdBytes`: did this upload bring the file into existence? Only
+  //    then may compensation delete the bytes. An overwrite must never remove
+  //    the target, and a file present on disk but absent from `file_index`
+  //    (out-of-band drop, or not yet scanned) is an overwrite, not a create.
+  //  - `createdIndexRow`: did this upload insert the index row? Only then may
+  //    compensation delete it.
+  const createdBytes = !(await pathExists(rel));
   const info = await writeUpload(rel, stream);
   const mime = opts.mime || mimeFromName(basenameOf(rel));
   const existing = await db.select().from(fileIndex).where(eq(fileIndex.path, rel));
-  const isNewPath = existing.length === 0;
+  const createdIndexRow = existing.length === 0;
   try {
-    if (!isNewPath) {
+    if (!createdIndexRow) {
       await db
         .update(fileIndex)
         .set({
@@ -82,8 +91,10 @@ export async function upload(
     await upsertFileSearch(rel);
     broadcastFilesChanged();
   } catch (err) {
-    if (isNewPath) {
+    if (createdBytes) {
       await removeFile(rel).catch(() => {});
+    }
+    if (createdIndexRow) {
       await db
         .delete(fileIndex)
         .where(eq(fileIndex.path, rel))
@@ -110,6 +121,10 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
     .from(fileIndex)
     .where(eq(fileIndex.path, fromRel))
     .then((r) => r[0]);
+  // `thumbnail.path` is FK'd to `file_index.path` ON DELETE CASCADE, so the
+  // row must be captured *before* the index row is deleted below — reading it
+  // afterwards always yields undefined and silently drops the thumbnail.
+  const existingThumb = db.select().from(thumbnail).where(eq(thumbnail.path, fromRel)).get();
 
   await moveFile(fromRel, toRel);
 
@@ -130,10 +145,8 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
     });
     await upsertFileSearch(toRel);
 
-    const thumb = db.select().from(thumbnail).where(eq(thumbnail.path, fromRel)).get();
-    if (thumb) {
-      await db.delete(thumbnail).where(eq(thumbnail.path, fromRel));
-      await db.insert(thumbnail).values({ ...thumb, path: toRel });
+    if (existingThumb) {
+      await db.insert(thumbnail).values({ ...existingThumb, path: toRel });
     }
 
     broadcastFilesChanged();
@@ -145,11 +158,6 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
       .catch(() => {});
     await deleteFileSearch(toRel).catch(() => {});
     try {
-      const thumbAtTo = db.select().from(thumbnail).where(eq(thumbnail.path, toRel)).get();
-      if (thumbAtTo) {
-        await db.delete(thumbnail).where(eq(thumbnail.path, toRel));
-        await db.insert(thumbnail).values({ ...thumbAtTo, path: fromRel });
-      }
       const fromIndex = db.select().from(fileIndex).where(eq(fileIndex.path, fromRel)).get();
       if (!fromIndex && existingRow) {
         const { stat: restoredStat } = await openStream(fromRel);
@@ -162,7 +170,14 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
           mime: existingRow.mime,
           uploadedByUserId: existingRow.uploadedByUserId,
         });
-        await upsertFileSearch(fromRel);
+      }
+      // Search is restored whether or not the index row was ours to re-insert;
+      // the bytes are back at `fromRel`, so the entry must exist again.
+      await upsertFileSearch(fromRel);
+      // Re-attach the thumbnail last: its FK requires the index row to be back.
+      if (existingThumb) {
+        const thumbAtFrom = db.select().from(thumbnail).where(eq(thumbnail.path, fromRel)).get();
+        if (!thumbAtFrom) await db.insert(thumbnail).values(existingThumb);
       }
     } catch {
       // Best-effort metadata revert; never mask the original failure.
@@ -174,6 +189,8 @@ export async function move(fromRel: string, toRel: string): Promise<{ path: stri
 
 export async function trashFile(rel: string, deletedByUserId: string): Promise<{ ok: true }> {
   const existingRow = db.select().from(fileIndex).where(eq(fileIndex.path, rel)).get();
+  // Captured before the cascading index delete below — see the note in `move`.
+  const existingThumb = db.select().from(thumbnail).where(eq(thumbnail.path, rel)).get();
   await openStream(rel);
   const id = crypto.randomUUID();
   const moved = await movePathToTrash(rel, id);
@@ -189,10 +206,25 @@ export async function trashFile(rel: string, deletedByUserId: string): Promise<{
     });
     await db.delete(fileIndex).where(eq(fileIndex.path, rel));
     await deleteFileSearch(rel);
-    await db.delete(thumbnail).where(eq(thumbnail.path, rel));
     broadcastFilesChanged();
   } catch (err) {
+    // Restoring the bytes is not enough: the trash row and the deleted index /
+    // search / thumbnail rows must go back too, or the file reappears in the
+    // library while a phantom trash entry points at a path that no longer
+    // exists.
     await restorePathFromTrash(moved.trashPath, rel).catch(() => {});
+    try {
+      await db.delete(trashItem).where(eq(trashItem.id, id));
+      if (existingRow && !db.select().from(fileIndex).where(eq(fileIndex.path, rel)).get()) {
+        await db.insert(fileIndex).values(existingRow);
+      }
+      await upsertFileSearch(rel);
+      if (existingThumb && !db.select().from(thumbnail).where(eq(thumbnail.path, rel)).get()) {
+        await db.insert(thumbnail).values(existingThumb);
+      }
+    } catch {
+      // Best-effort metadata revert; never mask the original failure.
+    }
     throw err;
   }
   return { ok: true };
@@ -219,12 +251,18 @@ export async function trashFolder(rel: string, deletedByUserId: string): Promise
       .delete(fileIndex)
       .where(sql`${fileIndex.path} = ${rel} OR ${fileIndex.path} LIKE ${`${rel}/%`}`);
     await deleteFileSearchPrefix(rel);
-    await db
-      .delete(thumbnail)
-      .where(sql`${thumbnail.path} = ${rel} OR ${thumbnail.path} LIKE ${`${rel}/%`}`);
     broadcastFilesChanged();
   } catch (err) {
     await restorePathFromTrash(moved.trashPath, rel).catch(() => {});
+    try {
+      await db.delete(trashItem).where(eq(trashItem.id, id));
+      // A subtree's index and search rows are rebuilt from disk rather than
+      // buffered in memory — the tree is unbounded in size. Thumbnails were
+      // cascade-deleted and regenerate lazily on next request.
+      await scan();
+    } catch {
+      // Best-effort metadata revert; never mask the original failure.
+    }
     throw err;
   }
   return { ok: true };
@@ -236,8 +274,10 @@ export async function restore(trashId: string, actor: LibraryActor): Promise<{ p
     throw new LibraryError('not_found', 'not found');
   }
 
+  let bytesRestored = false;
   try {
     await restorePathFromTrash(row.trashPath, row.originalPath);
+    bytesRestored = true;
     if (row.kind === 'file') {
       const { stat: restoredStat } = await openStream(row.originalPath);
       const mime = row.mime ?? mimeFromName(basenameOf(row.originalPath));
@@ -258,6 +298,24 @@ export async function restore(trashId: string, actor: LibraryActor): Promise<{ p
     broadcastFilesChanged();
     return { path: row.originalPath };
   } catch (err) {
+    // If the bytes made it out of the trash but the metadata work failed, put
+    // them back. `movePathToTrash` derives the trash path from the id, so the
+    // item lands exactly where its still-present `trash_item` row expects.
+    if (bytesRestored) {
+      await movePathToTrash(row.originalPath, row.id).catch(() => {});
+      try {
+        if (row.kind === 'file') {
+          await db.delete(fileIndex).where(eq(fileIndex.path, row.originalPath));
+          await deleteFileSearch(row.originalPath);
+        } else {
+          // The failed restore may have run a scan that indexed the subtree;
+          // now that the bytes are back in the trash, reconcile it away.
+          await scan();
+        }
+      } catch {
+        // Best-effort metadata revert; never mask the original failure.
+      }
+    }
     if (err instanceof PathError) {
       if (err.code === 'exists') {
         throw new LibraryError('exists', err.message);
@@ -286,14 +344,17 @@ export async function emptyTrash(actor: LibraryActor): Promise<{ removed: number
     .select()
     .from(trashItem)
     .where(actor.role === 'admin' ? undefined : eq(trashItem.deletedByUserId, actor.userId));
-  await Promise.all(rows.map((row) => removeTrashPath(row.trashPath)));
-  if (rows.length > 0) {
-    await db.delete(trashItem).where(
-      inArray(
-        trashItem.id,
-        rows.map((row) => row.id),
-      ),
-    );
+  // One unremovable path must not strand the rest: drop the rows whose bytes
+  // are actually gone and keep the others, so a retry can finish the job
+  // instead of leaving trash rows that point at nothing.
+  const outcomes = await Promise.allSettled(rows.map((row) => removeTrashPath(row.trashPath)));
+  const clearedIds = rows
+    .filter((_, i) => outcomes[i]?.status === 'fulfilled')
+    .map((row) => row.id);
+  if (clearedIds.length > 0) {
+    await db.delete(trashItem).where(inArray(trashItem.id, clearedIds));
   }
-  return { removed: rows.length };
+  const failure = outcomes.find((o) => o.status === 'rejected');
+  if (failure) throw failure.reason;
+  return { removed: clearedIds.length };
 }

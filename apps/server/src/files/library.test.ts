@@ -9,8 +9,22 @@ process.env.DB_PATH = join(testRoot, 'test.sqlite');
 process.env.DATA_DIR = join(testRoot, 'data');
 process.env.BETTER_AUTH_SECRET = 'test-secret';
 
-const compensateTestPath = join(import.meta.dir, 'library-compensate-isolated.ts');
-const moveCompensateTestPath = join(import.meta.dir, 'library-move-compensate-isolated.ts');
+/**
+ * Compensation suites need `mock.module`, which is process-wide and permanent,
+ * so each one runs in its own `bun test` child. Failing the parent on a
+ * non-zero exit keeps them wired into the normal `bun test` run.
+ */
+function runIsolatedSuite(fileName: string): void {
+  const proc = Bun.spawnSync(['bun', 'test', join(import.meta.dir, fileName)], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (proc.exitCode !== 0) {
+    console.error(proc.stdout.toString());
+    console.error(proc.stderr.toString());
+  }
+  expect(proc.exitCode).toBe(0);
+}
 
 const [{ runMigrations }, { db }, { fileIndex, user }, library, { openStream }, search] =
   await Promise.all([
@@ -56,16 +70,12 @@ describe('File Library — upload / createLibraryFolder', () => {
       .onConflictDoNothing();
   });
 
-  test('upload compensates bytes, index, and search when metadata fails after index upsert', async () => {
-    const proc = Bun.spawnSync(['bun', 'test', compensateTestPath], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    if (proc.exitCode !== 0) {
-      console.error(proc.stdout.toString());
-      console.error(proc.stderr.toString());
-    }
-    expect(proc.exitCode).toBe(0);
+  test('upload compensates bytes, index, and search when metadata fails after index upsert', () => {
+    runIsolatedSuite('library-compensate-isolated.ts');
+  });
+
+  test('failed overwrite never deletes the target bytes', () => {
+    runIsolatedSuite('library-overwrite-compensate-isolated.ts');
   });
 
   test('upload writes bytes, index row, and search hit', async () => {
@@ -100,16 +110,8 @@ describe('File Library — upload / createLibraryFolder', () => {
 });
 
 describe('File Library — move', () => {
-  test('move compensates bytes and index when metadata fails after rename', async () => {
-    const proc = Bun.spawnSync(['bun', 'test', moveCompensateTestPath], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    if (proc.exitCode !== 0) {
-      console.error(proc.stdout.toString());
-      console.error(proc.stderr.toString());
-    }
-    expect(proc.exitCode).toBe(0);
+  test('move compensates bytes and index when metadata fails after rename', () => {
+    runIsolatedSuite('library-move-compensate-isolated.ts');
   });
 
   test('move updates bytes, index path, and search', async () => {
@@ -165,6 +167,10 @@ describe('File Library — trash', () => {
     expect(db.select().from(fileIndex).where(eq(fileIndex.path, child)).get()).toBeUndefined();
     const row = db.select().from(trashItem).where(eq(trashItem.originalPath, folder)).get();
     expect(row?.kind).toBe('dir');
+  });
+
+  test('trash compensates bytes, index, search and trash row when metadata fails', () => {
+    runIsolatedSuite('library-trash-compensate-isolated.ts');
   });
 });
 
@@ -237,5 +243,52 @@ describe('File Library — restore / remove', () => {
       expect(err).toMatchObject({ code: 'not_found' });
     }
     expect(db.select().from(trashItem).where(eq(trashItem.id, tid)).get()).toBeDefined();
+  });
+});
+
+describe('File Library — emptyTrash', () => {
+  test('non-admin only empties their own trash rows', async () => {
+    const { trashItem } = await import('../db/schema');
+    const mine = `et-mine-${crypto.randomUUID().slice(0, 8)}.txt`;
+    const theirs = `et-theirs-${crypto.randomUUID().slice(0, 8)}.txt`;
+    for (const [path, owner] of [
+      [mine, 'lib-user'],
+      [theirs, 'other-user'],
+    ] as const) {
+      await library.upload(path, streamFromText('bye'), {
+        mime: 'text/plain',
+        uploadedByUserId: owner,
+      });
+      await library.trashFile(path, owner);
+    }
+
+    const { removed } = await library.emptyTrash({ userId: 'lib-user', role: 'user' });
+    expect(removed).toBeGreaterThanOrEqual(1);
+    expect(
+      db.select().from(trashItem).where(eq(trashItem.originalPath, mine)).get(),
+    ).toBeUndefined();
+    expect(
+      db.select().from(trashItem).where(eq(trashItem.originalPath, theirs)).get(),
+    ).toBeDefined();
+  });
+
+  test('admin empties every trash row and deletes the bytes', async () => {
+    const { trashItem } = await import('../db/schema');
+    const path = `et-admin-${crypto.randomUUID().slice(0, 8)}.txt`;
+    await library.upload(path, streamFromText('bye'), {
+      mime: 'text/plain',
+      uploadedByUserId: 'other-user',
+    });
+    await library.trashFile(path, 'other-user');
+    const trashPath = db
+      .select()
+      .from(trashItem)
+      .where(eq(trashItem.originalPath, path))
+      .get()!.trashPath;
+
+    await library.emptyTrash({ userId: 'lib-user', role: 'admin' });
+    expect(db.select().from(trashItem).all()).toHaveLength(0);
+    const { DATA_ROOT } = await import('./store');
+    expect(await Bun.file(join(DATA_ROOT, trashPath)).exists()).toBe(false);
   });
 });

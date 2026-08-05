@@ -1,3 +1,15 @@
+/**
+ * Runs in its own `bun test` process (spawned from library.test.ts).
+ *
+ * `mock.module` patches a module for the whole process and cannot be undone,
+ * so every suite that needs a *failing* dependency lives in its own file —
+ * otherwise the injected failure would leak into the happy-path assertions.
+ * The first broadcast is allowed through so the fixture upload can succeed;
+ * only the move's broadcast fails.
+ *
+ * What is pinned here: a move that fails after the rename must put the bytes
+ * back at the source and leave its metadata pointing there.
+ */
 import { beforeAll, describe, expect, mock, test } from 'bun:test';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -1,3 +1,13 @@
+/**
+ * Runs in its own `bun test` process (spawned from library.test.ts).
+ *
+ * `mock.module` patches a module for the whole process and cannot be undone,
+ * so every suite that needs a *failing* dependency lives in its own file —
+ * otherwise the injected failure would leak into the happy-path assertions.
+ *
+ * What is pinned here: an upload that *creates* a file and then fails must
+ * leave nothing behind — no bytes, no index row, no search entry.
+ */
 import { beforeAll, describe, expect, mock, test } from 'bun:test';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

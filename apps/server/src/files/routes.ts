@@ -70,14 +70,20 @@ type RecentFileEntry = {
 
 type MutationErrorSet = { status?: number | string };
 
-function mapMutationError(
-  err: unknown,
-  set: MutationErrorSet,
-): { error: string } | { error: 'not found' } | { error: 'trashed item missing' } {
+/**
+ * The sentinel messages clients may branch on, kept as literals so Eden still
+ * exposes them to the web app. `(string & {})` keeps the union open for
+ * pass-through messages without collapsing the literals into plain `string`.
+ */
+export type MutationErrorBody = {
+  error: 'not found' | 'trashed item missing' | (string & {});
+};
+
+function mapMutationError(err: unknown, set: MutationErrorSet): MutationErrorBody {
   if (err instanceof LibraryError) {
     if (err.code === 'not_found') {
       set.status = 404;
-      return { error: 'not found' };
+      return { error: 'not found' as const };
     }
     if (err.code === 'exists') {
       set.status = 409;
@@ -85,7 +91,7 @@ function mapMutationError(
     }
     if (err.code === 'trashed_missing') {
       set.status = 404;
-      return { error: 'trashed item missing' };
+      return { error: 'trashed item missing' as const };
     }
     set.status = 400;
     return { error: err.message };
@@ -93,7 +99,7 @@ function mapMutationError(
   if (err instanceof PathError) {
     if (err.code === 'not_found') {
       set.status = 404;
-      return { error: 'not found' };
+      return { error: 'not found' as const };
     }
     if (err.code === 'exists') {
       set.status = 409;
@@ -687,8 +693,12 @@ export const filesRoutes = new Elysia({ name: 'files' })
       return { error: 'unauthorized' as const };
     }
 
-    const { removed } = await emptyTrash(libraryActor(s.user));
-    return { ok: true as const, removed };
+    try {
+      const { removed } = await emptyTrash(libraryActor(s.user));
+      return { ok: true as const, removed };
+    } catch (err) {
+      return mapMutationError(err, set);
+    }
   })
 
   .post(
