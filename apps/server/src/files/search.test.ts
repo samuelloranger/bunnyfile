@@ -3,16 +3,16 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
-import {
-  deleteFileSearchPrefix,
-  rebuildFileSearchIndex,
-  searchFiles,
-  upsertFileSearch,
-} from './search';
 
 const testRoot = await mkdtemp(join(tmpdir(), 'bunnyfile-search-test-'));
 process.env.DB_PATH = join(testRoot, 'test.sqlite');
 process.env.DATA_DIR = join(testRoot, 'data');
+
+// ./search pulls in ../db, which reads DB_PATH at module-eval time. A static
+// import here would be hoisted above the assignments above and bind the real
+// dev database instead of this temp one.
+const { deleteFileSearchPrefix, rebuildFileSearchIndex, searchFiles, upsertFileSearch } =
+  await import('./search');
 
 const { db } = await import('../db');
 const { runMigrations } = await import('../db/migrate');

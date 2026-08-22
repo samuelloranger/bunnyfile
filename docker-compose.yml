@@ -4,7 +4,7 @@
 # Same ports inside the container network so no translation is needed.
 services:
   server:
-    image: oven/bun:1.3
+    image: oven/bun:1.4.0
     working_dir: /app
     command: sh -c "bun install && bun run --hot apps/server/src/index.ts"
     environment:
@@ -25,7 +25,7 @@ services:
       retries: 5
 
   web:
-    image: oven/bun:1.3
+    image: oven/bun:1.4.0
     working_dir: /app
     command: sh -c "bun install && cd apps/web && bun run dev -- --host 0.0.0.0"
     environment:

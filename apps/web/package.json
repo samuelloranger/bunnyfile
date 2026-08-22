@@ -29,7 +29,7 @@
     "@tanstack/react-query-devtools": "5.99.2",
     "@tanstack/react-router": "1.168.23",
     "@tanstack/react-router-devtools": "1.166.13",
-    "better-auth": "1.6.7",
+    "better-auth": "1.6.22",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.8.0",
@@ -50,6 +50,6 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.1",
     "tailwindcss": "4.2.4",
-    "vite": "8.0.9"
+    "vite": "8.0.16"
   }
 }

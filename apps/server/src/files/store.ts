@@ -394,26 +394,42 @@ export async function hashOnDisk(
 /** Create a memory-safe pull-based ReadableStream for streaming files of any size without buffering. */
 export function createFileStream(path: string, chunkSize = 256 * 1024): ReadableStream<Uint8Array> {
   let fd: FileHandle | null = null;
+  let done = false;
   return new ReadableStream({
-    async start() {
-      fd = await open(path, 'r');
-    },
+    // The handle is opened on the first pull, not in start(): a Response whose
+    // body is never read (a client that vanishes, a caller that only inspects
+    // headers) then never opens an fd at all. Bun 1.4 turned "FileHandle closed
+    // during garbage collection" from a deprecation warning into a hard error,
+    // so an orphaned handle is no longer survivable.
     async pull(controller) {
-      if (!fd) {
+      if (done) {
         controller.close();
         return;
       }
-      const buffer = new Uint8Array(chunkSize);
-      const { bytesRead } = await fd.read(buffer, 0, chunkSize, null);
-      if (bytesRead === 0) {
-        await fd.close();
-        fd = null;
-        controller.close();
-      } else {
-        controller.enqueue(buffer.subarray(0, bytesRead));
+      try {
+        if (!fd) fd = await open(path, 'r');
+        const buffer = new Uint8Array(chunkSize);
+        const { bytesRead } = await fd.read(buffer, 0, chunkSize, null);
+        if (bytesRead === 0) {
+          done = true;
+          await fd.close();
+          fd = null;
+          controller.close();
+        } else {
+          controller.enqueue(buffer.subarray(0, bytesRead));
+        }
+      } catch (err) {
+        // Never leave the handle dangling for the collector to complain about.
+        done = true;
+        if (fd) {
+          await fd.close().catch(() => {});
+          fd = null;
+        }
+        throw err;
       }
     },
     async cancel() {
+      done = true;
       if (fd) {
         await fd.close();
         fd = null;
