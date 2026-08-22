@@ -175,6 +175,9 @@ describe('files routes', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(res.headers.get('content-security-policy')).toContain('sandbox');
+    // Drain the body: an abandoned file stream leaves its handle to the
+    // collector, which Bun 1.4 reports as an error rather than a warning.
+    await res.arrayBuffer();
   });
 
   it('serves a suffix byte range (last N bytes)', async () => {
