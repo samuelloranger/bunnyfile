@@ -221,6 +221,40 @@ describe('shares routes', () => {
     expect(await downloadRes.text()).toBe('hello world');
   });
 
+  it('downloads a passwordless share when the form posts an empty body', async () => {
+    const createRes = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'hello.txt' }),
+    });
+    expect(createRes.status).toBe(200);
+    const created = (await createRes.json()) as { token: string };
+
+    // A form with no password field submits an empty urlencoded body.
+    const formRes = await request(`/api/shares/public/${created.token}/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: '',
+    });
+    expect(formRes.status).toBe(200);
+    expect(await formRes.text()).toBe('hello world');
+
+    const bareCreate = await request('/api/shares', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'hello.txt' }),
+    });
+    expect(bareCreate.status).toBe(200);
+    const bare = (await bareCreate.json()) as { token: string };
+
+    // No body and no content-type at all.
+    const bareRes = await request(`/api/shares/public/${bare.token}/file`, {
+      method: 'POST',
+    });
+    expect(bareRes.status).toBe(200);
+    expect(await bareRes.text()).toBe('hello world');
+  });
+
   it('lists shares and supports expiry + revoke', async () => {
     const expiredCreate = await request('/api/shares', {
       method: 'POST',

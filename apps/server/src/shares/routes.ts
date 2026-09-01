@@ -235,7 +235,12 @@ export const sharesRoutes = new Elysia({ name: 'shares' })
   .get('/api/shares/public/:token/file', downloadHandler)
 
   .post('/api/shares/public/:token/file', downloadHandler, {
-    body: t.Object({
-      password: t.Optional(t.String()),
-    }),
+    // The download form posts no fields when the share has no password, so the
+    // browser sends an empty body. t.Optional on the field alone still requires
+    // the object to be present, which rejected every passwordless download.
+    body: t.Optional(
+      t.Object({
+        password: t.Optional(t.String()),
+      }),
+    ),
   });
