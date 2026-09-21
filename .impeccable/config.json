@@ -8,6 +8,18 @@
         "value": "999px",
         "createdAt": "2026-09-21T14:13:09.265Z",
         "reason": "Intentional scrollbar-thumb pill shape in apps/web/src/styles.css; existing design choice, unrelated to route-transition styling."
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "createdAt": "2026-09-21T14:55:56.785Z",
+        "reason": "Intentional compact table and metadata labels in the existing dense file browser UI; not introduced by the transition change."
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "9px",
+        "createdAt": "2026-09-21T14:55:56.828Z",
+        "reason": "Intentional compact file-card metadata in the existing dense file browser UI; not introduced by the transition change."
       }
     ]
   }
