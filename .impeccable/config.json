@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-radius",
+        "value": "999px",
+        "createdAt": "2026-09-21T14:13:09.265Z",
+        "reason": "Intentional scrollbar-thumb pill shape in apps/web/src/styles.css; existing design choice, unrelated to route-transition styling."
+      }
+    ]
+  }
+}
