@@ -1,6 +1,6 @@
 import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
   ChevronRight,
   Copy,
@@ -25,13 +25,16 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
+  addTransitionType,
   type ChangeEvent,
   type DragEvent,
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  ViewTransition,
 } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '~/components/ui/badge';
@@ -410,6 +413,16 @@ function FilesPage() {
     if (files.length > 0) upload.mutate(files);
   }
 
+  const navigateFolder = useCallback(
+    (nextPath: string) => {
+      startTransition(() => {
+        addTransitionType('folder-navigation');
+        navigate({ to: '/files', search: buildFilesSearch({ path: nextPath, q, mode }) });
+      });
+    },
+    [mode, navigate, q],
+  );
+
   useEffect(() => {
     function onGridKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
@@ -445,7 +458,7 @@ function FilesPage() {
         const selected = entries[selectedIndex];
         if (!selected) return;
         if (selected.kind === 'dir') {
-          navigate({ to: '/files', search: buildFilesSearch({ path: selected.path, q, mode }) });
+          navigateFolder(selected.path);
         } else {
           setPreviewPath(selected.path);
         }
@@ -456,7 +469,7 @@ function FilesPage() {
     return () => {
       window.removeEventListener('keydown', onGridKeyDown);
     };
-  }, [entries, navigate, selectedIndex, q, mode]);
+  }, [entries, navigateFolder, selectedIndex]);
 
   // Names are always interpreted relative to the current folder, even when they
   // contain a `/` (e.g. renaming to `archive/old.txt` inside `docs/work` →
@@ -539,7 +552,7 @@ function FilesPage() {
             Workspace
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">Files</h1>
-          <Breadcrumb path={path} q={q} mode={mode} />
+          <Breadcrumb path={path} onNavigate={navigateFolder} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <fieldset className="m-0 flex min-w-0 items-center rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] p-0.5">
@@ -682,119 +695,117 @@ function FilesPage() {
             )
           )}
         </div>
-        {!isGlobalSearch && !allModePrompt && list.isLoading && (
-          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
-        )}
-        {isGlobalSearch && globalSearch.isLoading && (
-          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Searching…</p>
-        )}
-        {!isGlobalSearch && !allModePrompt && list.isError && (
-          <p className="p-6 text-sm text-[hsl(var(--destructive))]">
-            {String((list.error as Error)?.message ?? list.error)}
-          </p>
-        )}
-        {isGlobalSearch && globalSearch.isError && (
-          <p className="p-6 text-sm text-[hsl(var(--destructive))]">
-            {String((globalSearch.error as Error)?.message ?? globalSearch.error)}
-          </p>
-        )}
-        {allModePrompt && (
-          <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
-            {q.trim().length === 0
-              ? 'Type at least 2 characters to search all files.'
-              : 'Keep typing — searches require at least 2 characters.'}
-          </p>
-        )}
-        {isEmpty && (
-          <EmptyState
-            onUpload={openPicker}
-            onCreateFolder={() => setCreateFolderOpen(true)}
-            rootLevel={!path}
-          />
-        )}
-        {entries.length > 0 && (
-          <DragDropProvider
-            onDragEnd={(event) => {
-              if (event.canceled) return;
-              const source = parseDndId(event.operation?.source?.id);
-              const target = parseDndId(event.operation?.target?.id);
-              if (!source || !target) return;
-              if (source.kind !== 'file' || target.kind !== 'dir') return;
-              const fileName = source.path.split('/').at(-1) ?? source.path;
-              const newPath = target.path ? `${target.path}/${fileName}` : fileName;
-              if (newPath === source.path) return;
-              void rename.mutateAsync({ path: source.path, newPath });
-            }}
-          >
-            {viewMode === 'list' ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] text-left text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-                      <Th className="w-full">Name</Th>
-                      <Th>Size</Th>
-                      <Th>Modified</Th>
-                      <Th className="text-right">Actions</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entries.map((entry, i) => (
-                      <EntryRow
-                        key={entry.path}
-                        entry={entry}
-                        selected={i === selectedIndex}
-                        onNavigate={(p) =>
-                          navigate({ to: '/files', search: buildFilesSearch({ path: p, q, mode }) })
-                        }
-                        onPreview={setPreviewPath}
-                        onRename={onRename}
-                        onShare={(filePath) => {
-                          const name = filePath.split('/').at(-1) ?? filePath;
-                          setShareTarget({ path: filePath, name });
-                          setShareDays('7');
-                          setSharePassword('');
-                          setShareMaxDownloads('');
-                          setShareUrl(null);
-                        }}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 bg-transparent">
-                {entries.map((entry, i) => (
-                  <EntryCard
-                    key={entry.path}
-                    entry={entry}
-                    selected={i === selectedIndex}
-                    onNavigate={(p) =>
-                      navigate({ to: '/files', search: buildFilesSearch({ path: p, q, mode }) })
-                    }
-                    onPreview={setPreviewPath}
-                    onShare={(filePath) => {
-                      const name = filePath.split('/').at(-1) ?? filePath;
-                      setShareTarget({ path: filePath, name });
-                      setShareDays('7');
-                      setSharePassword('');
-                      setShareMaxDownloads('');
-                      setShareUrl(null);
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </DragDropProvider>
-        )}
-        {!list.isLoading &&
-          !globalSearch.isLoading &&
-          !isEmpty &&
-          !allModePrompt &&
-          entries.length === 0 && (
-            <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
-              No files match your search.
+        <ViewTransition update={{ 'folder-navigation': 'folder-list', default: 'none' }}>
+          {!isGlobalSearch && !allModePrompt && list.isLoading && (
+            <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
+          )}
+          {isGlobalSearch && globalSearch.isLoading && (
+            <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Searching…</p>
+          )}
+          {!isGlobalSearch && !allModePrompt && list.isError && (
+            <p className="p-6 text-sm text-[hsl(var(--destructive))]">
+              {String((list.error as Error)?.message ?? list.error)}
             </p>
           )}
+          {isGlobalSearch && globalSearch.isError && (
+            <p className="p-6 text-sm text-[hsl(var(--destructive))]">
+              {String((globalSearch.error as Error)?.message ?? globalSearch.error)}
+            </p>
+          )}
+          {allModePrompt && (
+            <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
+              {q.trim().length === 0
+                ? 'Type at least 2 characters to search all files.'
+                : 'Keep typing — searches require at least 2 characters.'}
+            </p>
+          )}
+          {isEmpty && (
+            <EmptyState
+              onUpload={openPicker}
+              onCreateFolder={() => setCreateFolderOpen(true)}
+              rootLevel={!path}
+            />
+          )}
+          {entries.length > 0 && (
+            <DragDropProvider
+              onDragEnd={(event) => {
+                if (event.canceled) return;
+                const source = parseDndId(event.operation?.source?.id);
+                const target = parseDndId(event.operation?.target?.id);
+                if (!source || !target) return;
+                if (source.kind !== 'file' || target.kind !== 'dir') return;
+                const fileName = source.path.split('/').at(-1) ?? source.path;
+                const newPath = target.path ? `${target.path}/${fileName}` : fileName;
+                if (newPath === source.path) return;
+                void rename.mutateAsync({ path: source.path, newPath });
+              }}
+            >
+              {viewMode === 'list' ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--surface-2))] text-left text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                        <Th className="w-full">Name</Th>
+                        <Th>Size</Th>
+                        <Th>Modified</Th>
+                        <Th className="text-right">Actions</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entries.map((entry, i) => (
+                        <EntryRow
+                          key={entry.path}
+                          entry={entry}
+                          selected={i === selectedIndex}
+                          onNavigate={navigateFolder}
+                          onPreview={setPreviewPath}
+                          onRename={onRename}
+                          onShare={(filePath) => {
+                            const name = filePath.split('/').at(-1) ?? filePath;
+                            setShareTarget({ path: filePath, name });
+                            setShareDays('7');
+                            setSharePassword('');
+                            setShareMaxDownloads('');
+                            setShareUrl(null);
+                          }}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 bg-transparent">
+                  {entries.map((entry, i) => (
+                    <EntryCard
+                      key={entry.path}
+                      entry={entry}
+                      selected={i === selectedIndex}
+                      onNavigate={navigateFolder}
+                      onPreview={setPreviewPath}
+                      onShare={(filePath) => {
+                        const name = filePath.split('/').at(-1) ?? filePath;
+                        setShareTarget({ path: filePath, name });
+                        setShareDays('7');
+                        setSharePassword('');
+                        setShareMaxDownloads('');
+                        setShareUrl(null);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </DragDropProvider>
+          )}
+          {!list.isLoading &&
+            !globalSearch.isLoading &&
+            !isEmpty &&
+            !allModePrompt &&
+            entries.length === 0 && (
+              <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">
+                No files match your search.
+              </p>
+            )}
+        </ViewTransition>
       </section>
 
       {list.data && !isGlobalSearch && !allModePrompt && (
@@ -1027,20 +1038,20 @@ function FilesPage() {
   );
 }
 
-function Breadcrumb({ path, q, mode }: { path: string; q: string; mode: FilesSearchMode }) {
+function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (path: string) => void }) {
   const parts = path ? path.split('/') : [];
   return (
     <nav
       aria-label="Breadcrumb"
       className="flex items-center gap-1 text-sm text-[hsl(var(--muted-foreground))]"
     >
-      <Link
-        to="/files"
-        search={buildFilesSearch({ path: '', q, mode })}
+      <button
+        type="button"
+        onClick={() => onNavigate('')}
         className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
       >
         <Home className="size-3.5" /> Root
-      </Link>
+      </button>
       {parts.map((segment, i) => {
         const sub = parts.slice(0, i + 1).join('/');
         const isLast = i === parts.length - 1;
@@ -1050,13 +1061,13 @@ function Breadcrumb({ path, q, mode }: { path: string; q: string; mode: FilesSea
             {isLast ? (
               <span className="truncate font-medium text-[hsl(var(--foreground))]">{segment}</span>
             ) : (
-              <Link
-                to="/files"
-                search={buildFilesSearch({ path: sub, q, mode })}
+              <button
+                type="button"
+                onClick={() => onNavigate(sub)}
                 className="truncate rounded-md px-1.5 py-0.5 hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]"
               >
                 {segment}
-              </Link>
+              </button>
             )}
           </span>
         );
