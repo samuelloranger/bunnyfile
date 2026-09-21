@@ -176,6 +176,102 @@
   }
 }
 
+/* Route changes are enabled by TanStack Router's defaultViewTransition option. */
+@keyframes route-enter-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes route-exit-to-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-1rem);
+  }
+}
+
+@keyframes route-enter-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes route-exit-to-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(1rem);
+  }
+}
+
+@keyframes route-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes route-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+:root:active-view-transition-type(route-forward) {
+  &::view-transition-old(root) {
+    animation: 160ms ease-in both route-exit-to-left;
+  }
+
+  &::view-transition-new(root) {
+    animation: 200ms ease-out both route-enter-from-right;
+  }
+}
+
+:root:active-view-transition-type(route-back) {
+  &::view-transition-old(root) {
+    animation: 160ms ease-in both route-exit-to-right;
+  }
+
+  &::view-transition-new(root) {
+    animation: 200ms ease-out both route-enter-from-left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:active-view-transition-type(route-forward),
+  :root:active-view-transition-type(route-back) {
+    &::view-transition-old(root) {
+      animation: 100ms linear both route-fade-out;
+    }
+
+    &::view-transition-new(root) {
+      animation: 100ms linear both route-fade-in;
+    }
+  }
+}
+
 /* Radix animation keyframes */
 @keyframes overlay-in {
   from {
