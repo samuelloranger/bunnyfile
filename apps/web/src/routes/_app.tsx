@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Navigate, Outlet } from '@tanstack/react-router';
-import { ViewTransition } from 'react';
 import { AppShell } from '~/components/layout/app-shell';
 import { SplashScreen } from '~/components/layout/splash-screen';
 import { authClient } from '~/lib/auth-client';
@@ -20,9 +19,9 @@ function AppLayout() {
 
   return (
     <AppShell>
-      <ViewTransition update={{ 'folder-navigation': 'none', default: 'app-route-content' }}>
+      <div className="route-transition-content">
         <Outlet />
-      </ViewTransition>
+      </div>
     </AppShell>
   );
 }

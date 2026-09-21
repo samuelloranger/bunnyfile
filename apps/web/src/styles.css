@@ -239,30 +239,46 @@
   }
 }
 
-::view-transition-old(.app-route-content) {
+:root:active-view-transition {
+  view-transition-name: none;
+}
+
+:root:active-view-transition .route-transition-content {
+  view-transition-name: app-route-content;
+}
+
+:root:active-view-transition-type(folder-navigation) .route-transition-content {
+  view-transition-name: none;
+}
+
+:root:active-view-transition-type(folder-navigation) .folder-transition-content {
+  view-transition-name: folder-list;
+}
+
+::view-transition-old(app-route-content) {
   animation: 160ms ease-in both route-exit-to-left;
 }
 
-::view-transition-new(.app-route-content) {
+::view-transition-new(app-route-content) {
   animation: 200ms ease-out both route-enter-from-right;
 }
 
-::view-transition-old(.folder-list) {
+::view-transition-old(folder-list) {
   animation: 120ms ease-in both route-exit-to-left;
 }
 
-::view-transition-new(.folder-list) {
+::view-transition-new(folder-list) {
   animation: 160ms ease-out both route-enter-from-right;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(.app-route-content),
-  ::view-transition-old(.folder-list) {
+  ::view-transition-old(app-route-content),
+  ::view-transition-old(folder-list) {
     animation: 100ms linear both route-fade-out;
   }
 
-  ::view-transition-new(.app-route-content),
-  ::view-transition-new(.folder-list) {
+  ::view-transition-new(app-route-content),
+  ::view-transition-new(folder-list) {
     animation: 100ms linear both route-fade-in;
   }
 }

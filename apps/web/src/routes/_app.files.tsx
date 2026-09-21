@@ -25,16 +25,13 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
-  addTransitionType,
   type ChangeEvent,
   type DragEvent,
-  startTransition,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  ViewTransition,
 } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '~/components/ui/badge';
@@ -87,6 +84,7 @@ import {
   uploadButtonLabel,
 } from '~/lib/upload-progress';
 import { useUploadTrigger } from '~/lib/upload-trigger';
+import { folderNavigationViewTransition } from '~/lib/view-transitions';
 
 type ListedEntry = Entry & { isParentLink?: boolean };
 type SortMode = 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc' | 'date-desc' | 'date-asc';
@@ -415,9 +413,10 @@ function FilesPage() {
 
   const navigateFolder = useCallback(
     (nextPath: string) => {
-      startTransition(() => {
-        addTransitionType('folder-navigation');
-        navigate({ to: '/files', search: buildFilesSearch({ path: nextPath, q, mode }) });
+      navigate({
+        to: '/files',
+        search: buildFilesSearch({ path: nextPath, q, mode }),
+        viewTransition: folderNavigationViewTransition(),
       });
     },
     [mode, navigate, q],
@@ -695,7 +694,7 @@ function FilesPage() {
             )
           )}
         </div>
-        <ViewTransition update={{ 'folder-navigation': 'folder-list', default: 'none' }}>
+        <div className="folder-transition-content">
           {!isGlobalSearch && !allModePrompt && list.isLoading && (
             <p className="p-6 text-sm text-[hsl(var(--muted-foreground))]">Loading…</p>
           )}
@@ -805,7 +804,7 @@ function FilesPage() {
                 No files match your search.
               </p>
             )}
-        </ViewTransition>
+        </div>
       </section>
 
       {list.data && !isGlobalSearch && !allModePrompt && (
