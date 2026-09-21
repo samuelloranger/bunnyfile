@@ -8,6 +8,14 @@ export function createRouter({ queryClient }: { queryClient: QueryClient }) {
     context: { queryClient },
     defaultPreload: 'intent',
     scrollRestoration: true,
-    defaultViewTransition: false,
+    defaultViewTransition: {
+      types: ({ fromLocation, pathChanged, toLocation }) => {
+        if (!pathChanged) return false;
+
+        const fromIndex = fromLocation?.state.__TSR_index;
+        const toIndex = toLocation.state.__TSR_index;
+        return fromIndex != null && toIndex < fromIndex ? ['route-back'] : ['route-forward'];
+      },
+    },
   });
 }

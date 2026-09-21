@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { QueryClient } from '@tanstack/react-query';
 
 describe('router view transitions', () => {
-  it('leaves visual transition ownership to React component boundaries', async () => {
+  it('starts typed native transitions for route changes only', async () => {
     const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const cssDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
 
@@ -17,9 +17,28 @@ describe('router view transitions', () => {
       });
       const { createRouter } = await import('./router');
 
-      expect(createRouter({ queryClient: {} as QueryClient }).options.defaultViewTransition).toBe(
-        false,
-      );
+      const transition = createRouter({ queryClient: {} as QueryClient }).options
+        .defaultViewTransition;
+
+      expect(transition).toEqual({
+        types: expect.any(Function),
+      });
+
+      if (!transition || typeof transition !== 'object' || typeof transition.types !== 'function') {
+        throw new Error('missing view transition type resolver');
+      }
+
+      const location = (index: number) => ({ state: { __TSR_index: index } });
+      const change = (pathChanged: boolean, fromIndex: number, toIndex: number) =>
+        ({
+          pathChanged,
+          fromLocation: location(fromIndex),
+          toLocation: location(toIndex),
+        }) as Parameters<typeof transition.types>[0];
+
+      expect(transition.types(change(true, 1, 2))).toEqual(['route-forward']);
+      expect(transition.types(change(true, 2, 1))).toEqual(['route-back']);
+      expect(transition.types(change(false, 1, 2))).toBe(false);
     } finally {
       if (windowDescriptor) Object.defineProperty(globalThis, 'window', windowDescriptor);
       else Reflect.deleteProperty(globalThis, 'window');
