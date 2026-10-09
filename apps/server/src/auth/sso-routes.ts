@@ -1,12 +1,11 @@
 import { Elysia, t } from 'elysia';
-import { reloadAuth } from './factory';
+import { applySsoSettings } from './factory';
 import { authOptions } from './options';
 import {
   callbackUrlFor,
   loadSsoRow,
   publicAuthConfig,
   SsoSettingsError,
-  saveSsoSettings,
   viewOf,
 } from './sso-settings';
 
@@ -50,8 +49,7 @@ export function ssoRoutes(getSession: GetSession) {
             return { error: 'forbidden' as const };
           }
           try {
-            await saveSsoSettings(body, s.user.id);
-            await reloadAuth();
+            await applySsoSettings(body, s.user.id);
           } catch (err) {
             if (err instanceof SsoSettingsError) {
               set.status = err.status;

@@ -119,6 +119,12 @@ export function viewOf(row: SsoSettingsRow | null, callbackUrl: string): SsoSett
   };
 }
 
+/** localhost, 127.0.0.0/8 and ::1 — where plain http is acceptable for development. */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return host === 'localhost' || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host);
+}
+
 export function normalizeIssuer(raw: string): string {
   let url: URL;
   try {
@@ -126,8 +132,10 @@ export function normalizeIssuer(raw: string): string {
   } catch {
     throw new SsoSettingsError('Issuer URL is not a valid URL');
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new SsoSettingsError('Issuer URL must start with https:// (or http://)');
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHost(url.hostname))) {
+    throw new SsoSettingsError(
+      'Issuer URL must use https:// (plain http:// is only accepted for localhost)',
+    );
   }
   if (url.search || url.hash)
     throw new SsoSettingsError('Issuer URL must not have a query or hash');
@@ -169,6 +177,11 @@ export async function validateDiscovery(issuer: string, fetchImpl: Fetcher = fet
       'The discovery document reports a different issuer than the one entered.',
     );
   }
+  if (typeof doc.jwks_uri !== 'string' || !doc.jwks_uri) {
+    throw new SsoSettingsError(
+      'The discovery document has no jwks_uri, so ID tokens cannot be verified.',
+    );
+  }
   if (typeof doc.authorization_endpoint !== 'string' || typeof doc.token_endpoint !== 'string') {
     throw new SsoSettingsError(
       'The discovery document is missing authorization_endpoint or token_endpoint.',
@@ -176,13 +189,35 @@ export async function validateDiscovery(issuer: string, fetchImpl: Fetcher = fet
   }
 }
 
-export function userHasSsoAccount(userId: string): boolean {
-  const row = db
-    .select({ id: account.id })
+function idTokenClaims(idToken: string | null): { iss?: unknown; aud?: unknown } | null {
+  const payload = idToken?.split('.')[1];
+  if (!payload) return null;
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the user has signed in through SSO against this exact provider
+ * (issuer + client ID). The stored ID token comes from a verified exchange and
+ * is refreshed on every SSO sign-in, so its `iss`/`aud` show which provider
+ * the account was last used with. A link made under a previous issuer or
+ * client doesn't count.
+ */
+export function userHasSsoAccount(userId: string, issuer: string, clientId: string): boolean {
+  const rows = db
+    .select({ idToken: account.idToken })
     .from(account)
     .where(and(eq(account.userId, userId), eq(account.providerId, SSO_PROVIDER_ID)))
-    .get();
-  return Boolean(row);
+    .all();
+  return rows.some(({ idToken }) => {
+    const claims = idTokenClaims(idToken);
+    if (typeof claims?.iss !== 'string' || claims.iss.replace(/\/+$/, '') !== issuer) return false;
+    const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    return aud.includes(clientId);
+  });
 }
 
 /**
@@ -202,6 +237,11 @@ export async function saveSsoSettings(
   if (!clientId) throw new SsoSettingsError('Client ID is required');
   const newSecret = input.clientSecret?.trim() ?? '';
   if (!newSecret && !existing) throw new SsoSettingsError('Client secret is required');
+  if (!newSecret && existing && (existing.issuer !== issuer || existing.clientId !== clientId)) {
+    throw new SsoSettingsError(
+      'Enter the client secret again when changing the issuer or client ID.',
+    );
+  }
   const label = input.label?.trim() || DEFAULT_LABEL;
   if (label.length > 40) throw new SsoSettingsError('Button label must be 40 characters or fewer');
   const scopes = normalizeScopes(input.scopes);
@@ -210,7 +250,7 @@ export async function saveSsoSettings(
     throw new SsoSettingsError('"SSO only" requires "Enable SSO"');
   }
   if (input.ssoOnly) {
-    if (!existing?.ssoOnly && !userHasSsoAccount(adminId)) {
+    if (!existing?.ssoOnly && !userHasSsoAccount(adminId, issuer, clientId)) {
       throw new SsoSettingsError(
         'Sign in once through SSO with your own account before turning on "SSO only", so you cannot lock yourself out.',
         403,
@@ -246,4 +286,16 @@ export async function saveSsoSettings(
     .onConflictDoUpdate({ target: ssoSettings.id, set: values })
     .run();
   return loadSsoRow() as SsoSettingsRow;
+}
+
+/** Put the singleton row back as it was (or remove it if there was none). */
+export function restoreSsoRow(previous: SsoSettingsRow | null): void {
+  if (!previous) {
+    db.delete(ssoSettings).where(eq(ssoSettings.id, SSO_PROVIDER_ID)).run();
+    return;
+  }
+  db.insert(ssoSettings)
+    .values(previous)
+    .onConflictDoUpdate({ target: ssoSettings.id, set: previous })
+    .run();
 }

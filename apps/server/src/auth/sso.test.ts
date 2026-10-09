@@ -44,10 +44,48 @@ let claims: Claims = {};
 const tokenRequests: { authorization: string | null; body: URLSearchParams }[] = [];
 let discoveryHits = 0;
 
-function jwt(payload: Claims): string {
-  const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  return `${enc({ alg: 'none', typ: 'JWT' })}.${enc(payload)}.sig`;
+const keys = await crypto.subtle.generateKey(
+  {
+    name: 'RSASSA-PKCS1-v1_5',
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: 'SHA-256',
+  },
+  true,
+  ['sign', 'verify'],
+);
+const publicJwk = {
+  ...(await crypto.subtle.exportKey('jwk', keys.publicKey)),
+  kid: 'k1',
+  alg: 'RS256',
+  use: 'sig',
+};
+let nonce = '';
+let discoveryFailAfter = Number.POSITIVE_INFINITY;
+let omitJwks = false;
+
+const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+
+async function jwt(payload: Claims, signWith: CryptoKey = keys.privateKey): Promise<string> {
+  const head = `${b64({ alg: 'RS256', kid: 'k1', typ: 'JWT' })}.${b64(payload)}`;
+  const sig = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    signWith,
+    new TextEncoder().encode(head),
+  );
+  return `${head}.${Buffer.from(sig).toString('base64url')}`;
 }
+let signWithOtherKey = false;
+const otherKeys = await crypto.subtle.generateKey(
+  {
+    name: 'RSASSA-PKCS1-v1_5',
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]),
+    hash: 'SHA-256',
+  },
+  true,
+  ['sign', 'verify'],
+);
 
 const idp = Bun.serve({
   port: 0,
@@ -56,13 +94,17 @@ const idp = Bun.serve({
     const origin = url.origin;
     if (url.pathname === '/.well-known/openid-configuration') {
       discoveryHits++;
+      if (discoveryHits > discoveryFailAfter) return new Response('down', { status: 500 });
       return Response.json({
         issuer: origin,
+        id_token_signing_alg_values_supported: ['RS256'],
+        ...(omitJwks ? {} : { jwks_uri: `${origin}/jwks` }),
         authorization_endpoint: `${origin}/authorize`,
         token_endpoint: `${origin}/token`,
         userinfo_endpoint: `${origin}/userinfo`,
       });
     }
+    if (url.pathname === '/jwks') return Response.json({ keys: [publicJwk] });
     if (url.pathname === '/token') {
       tokenRequests.push({
         authorization: req.headers.get('authorization'),
@@ -72,13 +114,41 @@ const idp = Bun.serve({
         access_token: 'at',
         token_type: 'Bearer',
         expires_in: 300,
-        id_token: jwt({ iss: origin, aud: 'bf-client', ...claims }),
+        id_token: await jwt(
+          {
+            iss: origin,
+            aud: 'bf-client',
+            iat: Math.floor(Date.now() / 1000),
+            exp: Math.floor(Date.now() / 1000) + 300,
+            nonce,
+            ...claims,
+          },
+          signWithOtherKey ? otherKeys.privateKey : keys.privateKey,
+        ),
       });
     }
     return new Response('not found', { status: 404 });
   },
 });
 const ISSUER = `http://localhost:${idp.port}`;
+
+function linkAccount(
+  id: string,
+  userId: string,
+  issuer = ISSUER,
+  aud: string | string[] = 'bf-client',
+) {
+  db.insert(account)
+    .values({
+      id,
+      accountId: `sub-${id}`,
+      providerId: 'oidc',
+      userId,
+      idToken: `x.${b64({ iss: issuer, aud })}.y`,
+      updatedAt: new Date(),
+    })
+    .run();
+}
 
 // --- helpers -----------------------------------------------------------------
 
@@ -141,6 +211,7 @@ async function ssoSignIn(): Promise<Response> {
   expect(authorize.origin).toBe(ISSUER);
   expect(authorize.searchParams.get('code_challenge_method')).toBe('S256');
   const state = authorize.searchParams.get('state') as string;
+  nonce = authorize.searchParams.get('nonce') ?? '';
   return auth.handler(
     new Request(`http://localhost:3901/api/auth/callback/oidc?code=abc&state=${state}`, {
       headers: { cookie: cookiesFrom(start), origin: ORIGIN },
@@ -162,6 +233,9 @@ beforeAll(async () => {
 
 afterEach(async () => {
   delete process.env.BUNNYFILE_FORCE_PASSWORD_LOGIN;
+  discoveryFailAfter = Number.POSITIVE_INFINITY;
+  omitJwks = false;
+  signWithOtherKey = false;
   db.delete(ssoSettings).run();
   db.delete(account).where(eq(account.providerId, 'oidc')).run();
   await reloadAuth();
@@ -226,8 +300,19 @@ describe('settings validation', () => {
       validateDiscovery(ISSUER, async () => Response.json({ issuer: 'https://other.example.com' })),
     ).rejects.toThrow(/different issuer/);
     await expect(
-      validateDiscovery(ISSUER, async () => Response.json({ issuer: ISSUER })),
+      validateDiscovery(ISSUER, async () =>
+        Response.json({ issuer: ISSUER, jwks_uri: `${ISSUER}/jwks` }),
+      ),
     ).rejects.toThrow(/authorization_endpoint/);
+    await expect(
+      validateDiscovery(ISSUER, async () =>
+        Response.json({
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/a`,
+          token_endpoint: `${ISSUER}/t`,
+        }),
+      ),
+    ).rejects.toThrow(/jwks_uri/);
     await validateDiscovery(ISSUER);
   });
 
@@ -245,6 +330,45 @@ describe('settings validation', () => {
     await saveSsoSettings({ ...baseInput, clientSecret: undefined, label: 'Other' }, adminId);
     expect(loadSsoRow()?.clientSecretEncrypted).toBe(before);
     expect(loadSsoRow()?.label).toBe('Other');
+  });
+});
+
+describe('issuer scheme', () => {
+  it('requires https, with http only for loopback hosts', () => {
+    expect(normalizeIssuer('https://id.example.com')).toBe('https://id.example.com');
+    expect(normalizeIssuer('http://localhost:9000')).toBe('http://localhost:9000');
+    expect(normalizeIssuer('http://127.0.0.1:9000/')).toBe('http://127.0.0.1:9000');
+    expect(normalizeIssuer('http://[::1]:9000')).toBe('http://[::1]:9000');
+    for (const bad of [
+      'http://id.example.com',
+      'http://192.168.1.10',
+      'http://localhost.example.com',
+      'http://127.0.0.1.example.com',
+    ]) {
+      expect(() => normalizeIssuer(bad)).toThrow(/https/);
+    }
+  });
+});
+
+describe('provider changes', () => {
+  it('requires a fresh client secret when the issuer or client ID changes', async () => {
+    await saveSsoSettings(baseInput, adminId);
+    const sameIssuerNewClient = await put(asAdmin(), {
+      ...baseInput,
+      clientId: 'other-client',
+      clientSecret: '',
+    });
+    expect(sameIssuerNewClient.status).toBe(400);
+    expect(((await sameIssuerNewClient.json()) as { error: string }).error).toMatch(
+      /client secret again/,
+    );
+    const newIssuer = await put(asAdmin(), {
+      ...baseInput,
+      issuer: `http://127.0.0.1:${idp.port}`,
+      clientSecret: undefined,
+    });
+    expect(newIssuer.status).toBe(400);
+    expect(loadSsoRow()?.clientId).toBe('bf-client');
   });
 });
 
@@ -289,43 +413,43 @@ describe('lockout guard', () => {
   });
 
   it('allows "SSO only" once the admin has a linked SSO account', async () => {
-    db.insert(account)
-      .values({
-        id: 'acc-admin-oidc',
-        accountId: 'idp-subject-1',
-        providerId: 'oidc',
-        userId: adminId,
-        updatedAt: new Date(),
-      })
-      .run();
+    linkAccount('acc-admin-oidc', adminId);
     const res = await put(asAdmin(), { ...baseInput, ssoOnly: true });
     expect(res.status).toBe(200);
     expect(loadSsoRow()?.ssoOnly).toBe(true);
   });
 
   it("does not count another user's linked account", async () => {
-    db.insert(account)
-      .values({
-        id: 'acc-member-oidc',
-        accountId: 'idp-subject-2',
-        providerId: 'oidc',
-        userId: memberId,
-        updatedAt: new Date(),
-      })
-      .run();
+    linkAccount('acc-member-oidc', memberId);
     expect((await put(asAdmin(), { ...baseInput, ssoOnly: true })).status).toBe(403);
   });
 
+  it('does not accept a link made under a different issuer or client', async () => {
+    linkAccount('acc-old-issuer', adminId, 'https://old-idp.example.com');
+    expect((await put(asAdmin(), { ...baseInput, ssoOnly: true })).status).toBe(403);
+    db.delete(account).where(eq(account.id, 'acc-old-issuer')).run();
+    linkAccount('acc-old-client', adminId, ISSUER, 'some-other-client');
+    expect((await put(asAdmin(), { ...baseInput, ssoOnly: true })).status).toBe(403);
+    expect(loadSsoRow()).toBeNull();
+  });
+
+  it('rejects changing the provider and turning SSO-only on in one save', async () => {
+    // Linked under the saved provider, then pointed at a new one.
+    await saveSsoSettings(baseInput, adminId);
+    linkAccount('acc-admin-oidc', adminId);
+    const res = await put(asAdmin(), {
+      ...baseInput,
+      clientId: 'brand-new-client',
+      clientSecret: 'fresh-secret',
+      ssoOnly: true,
+    });
+    expect(res.status).toBe(403);
+    expect(loadSsoRow()?.clientId).toBe('bf-client');
+    expect(loadSsoRow()?.ssoOnly).toBe(false);
+  });
+
   it('requires SSO to be enabled, and blocks a provider change while SSO-only', async () => {
-    db.insert(account)
-      .values({
-        id: 'acc-admin-oidc',
-        accountId: 'idp-subject-1',
-        providerId: 'oidc',
-        userId: adminId,
-        updatedAt: new Date(),
-      })
-      .run();
+    linkAccount('acc-admin-oidc', adminId);
     expect((await put(asAdmin(), { ...baseInput, enabled: false, ssoOnly: true })).status).toBe(
       400,
     );
@@ -502,6 +626,43 @@ describe('applying settings without a restart', () => {
   });
 });
 
+describe('rollback on a failed apply', () => {
+  it('restores the previous settings and instance when the provider cannot load', async () => {
+    expect((await put(asAdmin(), baseInput)).status).toBe(200);
+    expect(await loadedProviderIds()).toContain('oidc');
+
+    // Validation sees a good discovery document; the rebuild's fetch then fails.
+    discoveryFailAfter = discoveryHits + 1;
+    const res = await put(asAdmin(), { ...baseInput, label: 'Changed' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/nothing was changed/);
+    expect(loadSsoRow()?.label).toBe('Corp login');
+
+    discoveryFailAfter = Number.POSITIVE_INFINITY;
+    expect(await loadedProviderIds()).toContain('oidc');
+  });
+
+  it('removes a first-time config that cannot load', async () => {
+    discoveryFailAfter = discoveryHits + 1;
+    const res = await put(asAdmin(), baseInput);
+    expect(res.status).toBe(400);
+    expect(loadSsoRow()).toBeNull();
+    expect(publicAuthConfig().sso).toBe(false);
+  });
+
+  it('never leaves SSO-only on after a failed apply', async () => {
+    linkAccount('acc-admin-oidc', adminId);
+    expect((await put(asAdmin(), { ...baseInput, ssoOnly: true })).status).toBe(200);
+    discoveryFailAfter = discoveryHits + 1;
+    const res = await put(asAdmin(), { ...baseInput, ssoOnly: true, label: 'x' });
+    expect(res.status).toBe(400);
+    expect(loadSsoRow()?.label).toBe('Corp login');
+    expect(loadSsoRow()?.ssoOnly).toBe(true);
+    discoveryFailAfter = Number.POSITIVE_INFINITY;
+    expect(await loadedProviderIds()).toContain('oidc');
+  });
+});
+
 describe('SSO sign-in', () => {
   async function enable() {
     await saveSsoSettings(baseInput, adminId);
@@ -520,6 +681,9 @@ describe('SSO sign-in', () => {
     const linked = db.select().from(account).where(eq(account.providerId, 'oidc')).all();
     expect(linked).toHaveLength(1);
     expect(linked[0]?.userId).toBe(adminId);
+    // A real SSO sign-in counts as proof for SSO-only against this provider.
+    const { userHasSsoAccount } = await import('./sso-settings');
+    expect(userHasSsoAccount(adminId, ISSUER, 'bf-client')).toBe(true);
 
     // client_secret_basic + PKCE at the token endpoint
     const req = tokenRequests[0];
@@ -527,6 +691,24 @@ describe('SSO sign-in', () => {
     expect(req?.authorization).toBe(expected);
     expect(req?.body.get('code_verifier')).toBeTruthy();
     expect(req?.body.has('client_secret')).toBe(false);
+  });
+
+  it("refuses an ID token not signed by the provider's keys", async () => {
+    await enable();
+    claims = { sub: 'idp-subject-1', email: ADMIN_EMAIL, email_verified: true };
+    signWithOtherKey = true;
+    const res = await ssoSignIn();
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('/login?error=');
+    expect(cookiesFrom(res)).not.toContain('session_token');
+    expect(db.select().from(account).where(eq(account.providerId, 'oidc')).all()).toHaveLength(0);
+  });
+
+  it('refuses to apply a provider that publishes no jwks_uri', async () => {
+    omitJwks = true;
+    const res = await put(asAdmin(), baseInput);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/jwks_uri/);
   });
 
   it('refuses an unverified provider email', async () => {

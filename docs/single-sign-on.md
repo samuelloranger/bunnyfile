@@ -20,9 +20,10 @@ still invited by an admin, and are matched to the provider by email address.
    - Scopes: `openid`, `email` and `profile`. The provider must release the
      user's email and mark it verified (`email_verified: true`).
 2. As an admin, open **Settings → Single sign-on** and fill in:
-   - **Issuer URL**: the provider's issuer, whose
-     `/.well-known/openid-configuration` document must be reachable from the
-     BunnyFile server.
+   - **Issuer URL**: the provider's issuer (`https://`; plain `http://` is
+     accepted only for localhost). Its `/.well-known/openid-configuration`
+     document must be reachable from the BunnyFile server and include a
+     `jwks_uri`, because ID tokens are always signature-verified.
    - **Client ID** and **Client secret**.
    - **Button label** (default `SSO`) and **Scopes** (default
      `openid email profile`, must include `openid`).
@@ -50,9 +51,10 @@ Turning on **SSO only** hides the password form and makes the server answer
 `403` to password sign-in, sign-up and password-reset requests.
 
 To prevent locking yourself out it can only be switched on after **your own**
-admin account has signed in through SSO at least once (so it is linked). While
-SSO only is on, the provider (issuer or client ID) cannot be changed; turn it
-off first.
+admin account has signed in through SSO against the *current* issuer and client
+ID. Changing either requires re-entering the client secret, and while SSO only
+is on they cannot be changed at all; turn it off first. If the new settings
+cannot be loaded, the save is rejected and the previous settings stay in place.
 
 ## Locked out? Force password login
 
