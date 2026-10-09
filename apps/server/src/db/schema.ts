@@ -244,3 +244,23 @@ export const trashItem = sqliteTable(
 export type TrashItemRow = typeof trashItem.$inferSelect;
 
 export type ThumbnailRow = typeof thumbnail.$inferSelect;
+
+/**
+ * Single sign-on (OIDC) settings, edited by an admin in the UI. A singleton
+ * row (`id = 'oidc'`). The client secret is AES-GCM encrypted at rest.
+ */
+export const ssoSettings = sqliteTable('sso_settings', {
+  id: text('id').primaryKey(),
+  issuer: text('issuer').notNull(),
+  clientId: text('client_id').notNull(),
+  clientSecretEncrypted: text('client_secret_encrypted').notNull(),
+  label: text('label').notNull().default('SSO'),
+  scopes: text('scopes').notNull().default('openid email profile'),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  ssoOnly: integer('sso_only', { mode: 'boolean' }).notNull().default(false),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+    .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+    .notNull(),
+});
+
+export type SsoSettingsRow = typeof ssoSettings.$inferSelect;

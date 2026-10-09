@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { HardDrive, KeyRound } from 'lucide-react';
+import { SsoSettingsSection } from '~/components/settings/sso-settings';
 import { Button } from '~/components/ui/button';
+import { authClient } from '~/lib/auth-client';
 import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { formatBytes, storageUsageQuery } from '~/lib/storage';
 
@@ -11,6 +13,8 @@ export const Route = createFileRoute('/_app/settings')({
 
 function SettingsPage() {
   const usage = useQuery(storageUsageQuery());
+  const session = authClient.useSession();
+  const isAdmin = session.data?.user.role === 'admin';
 
   return (
     <div>
@@ -68,6 +72,8 @@ function SettingsPage() {
           </Button>
         </div>
       </section>
+
+      {isAdmin && <SsoSettingsSection />}
     </div>
   );
 }

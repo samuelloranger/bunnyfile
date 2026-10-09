@@ -78,6 +78,16 @@ export const authOptions = {
       },
     },
   },
+  account: {
+    accountLinking: {
+      enabled: true,
+      // Deliberately no trustedProviders: trusted providers skip the
+      // provider's email_verified check, which SSO linking must keep.
+      // Local accounts are created without email verification (invites), so
+      // the local flag can't be required.
+      requireLocalEmailVerified: false,
+    },
+  },
   session: {
     expiresIn: 60 * 60 * 24 * 30, // 30 days
     updateAge: 60 * 60 * 24, // refresh daily

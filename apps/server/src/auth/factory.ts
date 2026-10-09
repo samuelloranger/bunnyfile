@@ -1,0 +1,148 @@
+import { betterAuth } from 'better-auth';
+import { genericOAuth } from 'better-auth/plugins';
+import { authOptions } from './options';
+import { PASSWORD_AUTH_PATHS } from './password-paths';
+import {
+  loadSsoRow,
+  loadSsoRuntime,
+  restoreSsoRow,
+  SSO_PROVIDER_ID,
+  type SsoRuntimeConfig,
+  SsoSettingsError,
+  type SsoSettingsInput,
+  saveSsoSettings,
+} from './sso-settings';
+
+/**
+ * better-auth reads its provider list once, when the instance is created (the
+ * generic OAuth plugin also fetches the discovery document there). To apply
+ * SSO settings without a restart, the live instance is rebuilt from the saved
+ * settings and swapped in; `auth` in ./auth.ts always forwards to the current
+ * one. Sessions live in the database and are signed with the same secret, so
+ * sessions created by an earlier instance stay valid.
+ */
+export function buildAuth(sso: SsoRuntimeConfig | null) {
+  return betterAuth({
+    ...authOptions,
+    // Router-level block (404) for password routes in SSO-only mode; the
+    // server-side auth.api calls used by admin invites are unaffected. Rebuilt
+    // with the instance, so it follows the saved setting.
+    ...(sso?.passwordDisabled ? { disabledPaths: [...PASSWORD_AUTH_PATHS] } : {}),
+    plugins: [
+      genericOAuth({
+        config: sso
+          ? [
+              {
+                providerId: SSO_PROVIDER_ID,
+                name: sso.label,
+                clientId: sso.clientId,
+                clientSecret: sso.clientSecret,
+                discoveryUrl: `${sso.issuer}/.well-known/openid-configuration`,
+                scopes: sso.scopes,
+                pkce: true,
+                // Verify the ID token signature against the provider's JWKS.
+                requireIdTokenVerification: true,
+                // client_secret_basic at the token endpoint.
+                authentication: 'basic',
+                // Never create users from SSO. (Unlike disableImplicitSignUp,
+                // a client can't override this with requestSignUp.)
+                disableSignUp: true,
+                // Require a verified email. Dropping the address makes the
+                // callback stop with `email_not_found`; it can't be linked or
+                // matched to a local user.
+                mapProfileToUser: (profile) =>
+                  profile.emailVerified === true || profile.email_verified === true
+                    ? {}
+                    : { email: null },
+              },
+            ]
+          : [],
+      }),
+    ],
+  });
+}
+
+export type Auth = ReturnType<typeof buildAuth>;
+
+let current: Auth = buildAuth(null);
+let ssoExpected = false;
+let lastRetryAt = 0;
+let chain: Promise<unknown> = Promise.resolve();
+
+export function getAuth(): Auth {
+  return current;
+}
+
+async function providerLoaded(instance: Auth): Promise<boolean> {
+  const ctx = await instance.$context;
+  return ctx.socialProviders.some((p) => p.id === SSO_PROVIDER_ID);
+}
+
+async function rebuild(): Promise<boolean> {
+  const sso = loadSsoRuntime();
+  const next = buildAuth(sso);
+  // Awaiting the context runs plugin init, which fetches the discovery document.
+  const loaded = sso ? await providerLoaded(next) : false;
+  current = next;
+  ssoExpected = sso !== null && !loaded;
+  lastRetryAt = Date.now();
+  return sso === null || loaded;
+}
+
+type AuthState = { instance: Auth; ssoExpected: boolean };
+
+function snapshotAuth(): AuthState {
+  return { instance: current, ssoExpected };
+}
+
+/** Swap a previously live instance back in. No network, so it works while the provider is down. */
+function restoreAuth(state: AuthState): void {
+  current = state.instance;
+  ssoExpected = state.ssoExpected;
+}
+
+/**
+ * Rebuild the live auth instance from the saved SSO settings. Serialized.
+ * Resolves to false when SSO is enabled but the provider failed to load.
+ */
+export function reloadAuth(): Promise<boolean> {
+  const run = chain.then(rebuild, rebuild);
+  chain = run.catch(() => {});
+  return run;
+}
+
+/**
+ * If SSO is enabled but the provider failed to load (the identity provider was
+ * unreachable when the instance was built), retry at most every 15 seconds so
+ * sign-in recovers on its own once the provider is back.
+ */
+export async function retryProviderIfMissing(): Promise<void> {
+  if (!ssoExpected || Date.now() - lastRetryAt < 15_000) return;
+  lastRetryAt = Date.now();
+  await reloadAuth().catch((err) => console.error('[sso] reload failed', err));
+}
+
+/**
+ * Validate, save and apply new SSO settings. If the rebuilt instance can't load
+ * the provider, the previous settings and instance are restored and the save is
+ * rejected, so a bad save never leaves SSO (or SSO-only) without a working provider.
+ */
+export async function applySsoSettings(input: SsoSettingsInput, adminId: string): Promise<void> {
+  const previous = loadSsoRow();
+  // Serialize with other reloads so the snapshot is the instance actually live.
+  await chain;
+  const previousAuth = snapshotAuth();
+  await saveSsoSettings(input, adminId);
+  let loaded = false;
+  try {
+    loaded = await reloadAuth();
+  } catch (err) {
+    console.error('[sso] applying settings failed', err instanceof Error ? err.message : err);
+  }
+  if (loaded) return;
+  restoreSsoRow(previous);
+  restoreAuth(previousAuth);
+  throw new SsoSettingsError(
+    'The provider could not be loaded with these settings, so nothing was changed. Check that the provider is reachable and publishes a usable discovery document.',
+  );
+}

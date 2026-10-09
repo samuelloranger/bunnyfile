@@ -68,6 +68,7 @@ Designed to be safe behind a reverse proxy. What's in the box:
 
 - **Shared workspace:** every authenticated user can list, download, and delete the whole files tree. Any valid S3 access key reaches every bucket. `uploadedByUserId` is attribution, not an ACL — use folders like `alice/` / `bob/` as a convention if you want separation.
 - **Auth:** native email/password via [better-auth](https://better-auth.com) (scrypt hashing, cookie sessions, 30-day expiry). First signup becomes admin; admins manage users on `/people`. Alternatively run in **forward-auth** mode behind Tinyauth/Caddy — one mode at a time.
+- **Single sign-on (optional):** admins can add any OpenID Connect provider (Authelia, Authentik, Keycloak, …) from **Settings → Single sign-on**, with no restart. See [`docs/single-sign-on.md`](./docs/single-sign-on.md).
 - **Password reset:** self-service email-link flow (1-hour token, all sessions revoked on reset, rate-limited, no email enumeration). Configure SMTP (`SMTP_HOST` etc.) to send mail; without it, reset links are logged to stdout for an admin to relay.
 - **Origin policy:** a single trusted-origin allowlist (localhost + RFC1918 LAN + explicit `WEB_ORIGIN` / env entries) backs both the CSRF check and CORS, so they can't disagree.
 - **Share links:** optional password, expiry, and max-download count; expired/exhausted links render a 410. Public share access is rate-limited (in-memory token bucket). Passwords are never accepted via query string.
@@ -75,7 +76,8 @@ Designed to be safe behind a reverse proxy. What's in the box:
 
 **Operator checklist:**
 
-- Set `BETTER_AUTH_SECRET` to a random 32-byte value **before first boot** — the process refuses to start without it. Changing it later invalidates encrypted S3 access-key secrets stored in SQLite.
+- Set `BETTER_AUTH_SECRET` to a random 32-byte value **before first boot** — the process refuses to start without it. Changing it later invalidates encrypted S3 access-key secrets and the stored SSO client secret (re-enter it in Settings).
+- Set `BETTER_AUTH_URL` to the public URL of the instance if you use SSO: the callback URL shown in Settings is derived from it.
 - Terminate TLS at a reverse proxy (see `deploy/compose/caddy.yml`) — don't expose `:3901` directly.
 - Behind Caddy (or any reverse proxy), set `TRUST_PROXY=1` so share rate limits use the real client IP from `X-Forwarded-For`. Optionally set `TRUSTED_PROXIES` to a comma-separated IPv4/CIDR allowlist of proxy peers (e.g. `10.0.0.0/8`); without it, any peer is trusted when `TRUST_PROXY` is on.
 - Restrict cross-origin access with `WEB_ORIGIN` when serving from a custom domain.
