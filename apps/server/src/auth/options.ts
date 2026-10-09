@@ -81,10 +81,10 @@ export const authOptions = {
   account: {
     accountLinking: {
       enabled: true,
-      // Only the admin-configured OIDC provider may attach to an existing
-      // user, matched by email. Local accounts are created without email
-      // verification (invites), so the local flag can't be required.
-      trustedProviders: ['oidc'],
+      // Deliberately no trustedProviders: trusted providers skip the
+      // provider's email_verified check, which SSO linking must keep.
+      // Local accounts are created without email verification (invites), so
+      // the local flag can't be required.
       requireLocalEmailVerified: false,
     },
   },

@@ -35,6 +35,27 @@ function LoginPage() {
   if (setup.isLoading || session.isPending || authConfig.isLoading)
     return <SplashScreen message="Checking your session…" />;
   if (setup.data?.needsSetup) return <Navigate to="/setup" />;
+  if (authConfig.isError) {
+    // Without the login mode we can't tell whether passwords are allowed, so
+    // don't fall back to the password form.
+    return (
+      <AuthShell>
+        <AuthCard title="Welcome back" description="Sign in to your BunnyFile account.">
+          <div className="space-y-4">
+            <p
+              role="alert"
+              className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] px-3 py-2 text-sm text-[hsl(var(--destructive))]"
+            >
+              Couldn't load the sign-in options.
+            </p>
+            <Button className="w-full" variant="outline" onClick={() => authConfig.refetch()}>
+              Retry
+            </Button>
+          </div>
+        </AuthCard>
+      </AuthShell>
+    );
+  }
   if (session.data?.user) return <Navigate to="/files" search={FILES_HOME_SEARCH} />;
 
   async function handleSubmit(e: FormEvent) {

@@ -409,6 +409,34 @@ describe('password endpoints in SSO-only mode', () => {
     }
   });
 
+  it('also blocks at the better-auth router, but not for server-side calls', async () => {
+    enableSsoOnly();
+    await reloadAuth();
+    const res = await auth.handler(
+      new Request('http://localhost:3901/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ email: ADMIN_EMAIL, password: PASSWORD }),
+      }),
+    );
+    expect(res.status).toBe(404);
+    const direct = await auth.api.signInEmail({
+      body: { email: ADMIN_EMAIL, password: PASSWORD },
+    });
+    expect(direct.user.email).toBe(ADMIN_EMAIL);
+    // Lifting SSO-only restores the route without a restart.
+    db.delete(ssoSettings).run();
+    await reloadAuth();
+    const again = await auth.handler(
+      new Request('http://localhost:3901/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ email: ADMIN_EMAIL, password: PASSWORD }),
+      }),
+    );
+    expect(again.status).toBe(200);
+  });
+
   it('keeps non-password auth endpoints reachable', async () => {
     enableSsoOnly();
     const res = await app.handle(new Request('http://localhost/api/auth/get-session'));

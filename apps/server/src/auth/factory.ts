@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { genericOAuth } from 'better-auth/plugins';
 import { authOptions } from './options';
+import { PASSWORD_AUTH_PATHS } from './password-paths';
 import { loadSsoRuntime, SSO_PROVIDER_ID, type SsoRuntimeConfig } from './sso-settings';
 
 /**
@@ -14,6 +15,10 @@ import { loadSsoRuntime, SSO_PROVIDER_ID, type SsoRuntimeConfig } from './sso-se
 export function buildAuth(sso: SsoRuntimeConfig | null) {
   return betterAuth({
     ...authOptions,
+    // Router-level block (404) for password routes in SSO-only mode; the
+    // server-side auth.api calls used by admin invites are unaffected. Rebuilt
+    // with the instance, so it follows the saved setting.
+    ...(sso?.passwordDisabled ? { disabledPaths: [...PASSWORD_AUTH_PATHS] } : {}),
     plugins: [
       genericOAuth({
         config: sso

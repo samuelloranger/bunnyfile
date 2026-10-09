@@ -42,6 +42,8 @@ export type SsoRuntimeConfig = {
   clientSecret: string;
   label: string;
   scopes: string[];
+  /** SSO-only is on and not overridden by BUNNYFILE_FORCE_PASSWORD_LOGIN. */
+  passwordDisabled: boolean;
 };
 
 export class SsoSettingsError extends Error {
@@ -75,6 +77,7 @@ export function loadSsoRuntime(row: SsoSettingsRow | null = loadSsoRow()): SsoRu
       clientSecret: decryptSsoSecret(row.clientSecretEncrypted),
       label: row.label,
       scopes: row.scopes.split(/\s+/).filter(Boolean),
+      passwordDisabled: row.ssoOnly && !isPasswordLoginForced(),
     };
   } catch {
     console.error('[sso] stored client secret could not be decrypted; SSO is unavailable');
