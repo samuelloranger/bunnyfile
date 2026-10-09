@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
-import { KeyRound, Mail } from 'lucide-react';
+import { KeyRound, Mail, ShieldCheck } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { AuthCard, AuthShell } from '~/components/auth/auth-card';
 import { SplashScreen } from '~/components/layout/splash-screen';
@@ -8,24 +8,31 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { authClient } from '~/lib/auth-client';
+import { authConfigQuery, ssoErrorMessage } from '~/lib/auth-config';
 import { FILES_HOME_SEARCH } from '~/lib/files-search';
 import { setupStatusQuery } from '~/lib/setup';
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
+  validateSearch: (search: Record<string, unknown>): { error?: string } =>
+    typeof search.error === 'string' ? { error: search.error } : {},
 });
 
 function LoginPage() {
   const setup = useQuery(setupStatusQuery);
+  const authConfig = useQuery(authConfigQuery);
+  const { error: ssoErrorCode } = Route.useSearch();
   const session = authClient.useSession();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    ssoErrorCode ? ssoErrorMessage(ssoErrorCode) : null,
+  );
   const [pending, setPending] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
 
-  if (setup.isLoading || session.isPending)
+  if (setup.isLoading || session.isPending || authConfig.isLoading)
     return <SplashScreen message="Checking your session…" />;
   if (setup.data?.needsSetup) return <Navigate to="/setup" />;
   if (session.data?.user) return <Navigate to="/files" search={FILES_HOME_SEARCH} />;
@@ -41,6 +48,59 @@ function LoginPage() {
       return;
     }
     navigate({ to: '/files', search: FILES_HOME_SEARCH });
+  }
+
+  async function handleSso() {
+    setError(null);
+    setPending(true);
+    const { error } = await authClient.signIn.social({
+      provider: 'oidc',
+      callbackURL: `${window.location.origin}/`,
+      errorCallbackURL: `${window.location.origin}/login`,
+    });
+    // On success the browser leaves for the identity provider.
+    if (error) {
+      setPending(false);
+      setError(error.message ?? 'Could not start single sign-on');
+    }
+  }
+
+  const sso = authConfig.data?.sso ?? false;
+  const ssoOnly = sso && (authConfig.data?.ssoOnly ?? false);
+  const errorAlert = error && (
+    <p
+      id="login-error"
+      role="alert"
+      className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] px-3 py-2 text-sm text-[hsl(var(--destructive))]"
+    >
+      {error}
+    </p>
+  );
+  const ssoButton = sso && (
+    <Button
+      type="button"
+      variant={ssoOnly ? 'primary' : 'outline'}
+      className="w-full"
+      size="lg"
+      leftIcon={<ShieldCheck />}
+      loading={pending}
+      onClick={handleSso}
+    >
+      {authConfig.data?.label || 'SSO'}
+    </Button>
+  );
+
+  if (ssoOnly) {
+    return (
+      <AuthShell>
+        <AuthCard title="Welcome back" description="Sign in to your BunnyFile account.">
+          <div className="space-y-4">
+            {errorAlert}
+            {ssoButton}
+          </div>
+        </AuthCard>
+      </AuthShell>
+    );
   }
 
   return (
@@ -76,20 +136,23 @@ function LoginPage() {
             />
           </div>
 
-          {error && (
-            <p
-              id="login-error"
-              role="alert"
-              className="rounded-md border border-[hsl(var(--destructive)/0.3)] bg-[hsl(var(--destructive)/0.08)] px-3 py-2 text-sm text-[hsl(var(--destructive))]"
-            >
-              {error}
-            </p>
-          )}
+          {errorAlert}
 
           <Button type="submit" className="w-full" size="lg" loading={pending}>
             Sign in
           </Button>
         </form>
+
+        {sso && (
+          <div className="mt-4 space-y-4">
+            <div className="flex items-center gap-3 text-xs text-[hsl(var(--muted-foreground))]">
+              <span className="h-px flex-1 bg-[hsl(var(--border))]" />
+              or
+              <span className="h-px flex-1 bg-[hsl(var(--border))]" />
+            </div>
+            {ssoButton}
+          </div>
+        )}
 
         <div className="mt-4 space-y-2">
           <button

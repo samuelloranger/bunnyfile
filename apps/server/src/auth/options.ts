@@ -78,6 +78,16 @@ export const authOptions = {
       },
     },
   },
+  account: {
+    accountLinking: {
+      enabled: true,
+      // Only the admin-configured OIDC provider may attach to an existing
+      // user, matched by email. Local accounts are created without email
+      // verification (invites), so the local flag can't be required.
+      trustedProviders: ['oidc'],
+      requireLocalEmailVerified: false,
+    },
+  },
   session: {
     expiresIn: 60 * 60 * 24 * 30, // 30 days
     updateAge: 60 * 60 * 24, // refresh daily

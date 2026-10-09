@@ -6,7 +6,11 @@ import { swagger } from '@elysiajs/swagger';
 import { count } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from './auth/auth';
+import { reloadAuth } from './auth/factory';
 import { isTrustedOrigin } from './auth/origins';
+import { isPasswordAuthPath } from './auth/password-paths';
+import { ssoRoutes } from './auth/sso-routes';
+import { isPasswordLoginBlocked } from './auth/sso-settings';
 import { db } from './db';
 import { runMigrations } from './db/migrate';
 import { user } from './db/schema';
@@ -22,6 +26,8 @@ import { s3Routes } from './s3/routes';
 import { allowShareRequest, requestIp } from './shares/rate-limit';
 import { sharesRoutes } from './shares/routes';
 import { usersRoutes } from './users/routes';
+
+const PASSWORD_LOGIN_DISABLED = 'password login is disabled — sign in with single sign-on';
 
 const startedAt = Date.now();
 const version = Bun.env.APP_VERSION ?? '0.0.1';
@@ -58,9 +64,23 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
   )
   // better-auth handles every /api/auth/* route. Register per-method so the
   // GET handler doesn't lose to the SPA fallback `.get('/*', ...)` below.
-  .get('/api/auth/*', ({ request }) => auth.handler(request))
+  .use(ssoRoutes((headers) => auth.api.getSession({ headers })))
+  .get('/api/auth/*', ({ request, set }) => {
+    // The reset link lands here; refuse it when only SSO is allowed.
+    if (isPasswordAuthPath(new URL(request.url).pathname) && isPasswordLoginBlocked()) {
+      set.status = 403;
+      return { error: PASSWORD_LOGIN_DISABLED };
+    }
+    return auth.handler(request);
+  })
   .post('/api/auth/*', async ({ request, set, server }) => {
     const path = new URL(request.url).pathname;
+    // "SSO only": password sign-in, sign-up and reset are refused server-side,
+    // not just hidden in the UI. BUNNYFILE_FORCE_PASSWORD_LOGIN=true overrides.
+    if (isPasswordAuthPath(path) && isPasswordLoginBlocked()) {
+      set.status = 403;
+      return { error: PASSWORD_LOGIN_DISABLED };
+    }
     // Block public self-registration once the instance is set up. The first
     // user (admin) is created during /setup; afterwards new accounts come only
     // from admin invites, which call auth.api server-side and bypass this HTTP
@@ -164,6 +184,8 @@ export type { Auth } from './auth/auth';
 
 if (import.meta.main) {
   runMigrations();
+  // Build the live auth instance from the saved SSO settings.
+  await reloadAuth().catch((err) => console.error('[sso] initial load failed', err));
   rebuildFileSearchIndex()
     .then((count) => {
       if (count > 0) console.log(`[search] indexed ${count} files`);
