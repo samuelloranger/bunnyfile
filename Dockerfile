@@ -1,6 +1,6 @@
 # Single-container production image.
 # Elysia serves /api/* and the built web app from apps/web/dist on /.
-FROM oven/bun:1.4.0 AS deps
+FROM oven/bun:1.4.4 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/server/package.json apps/server/
@@ -15,7 +15,7 @@ RUN cd apps/web && bun run build
 # node_modules after the build so the runtime stage copies a lean tree.
 RUN bun prune --production
 
-FROM oven/bun:1.4.0-slim AS runtime
+FROM oven/bun:1.4.4-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ARG APP_VERSION=0.0.1
