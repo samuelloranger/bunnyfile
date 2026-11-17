@@ -160,6 +160,48 @@ describe('multipart uploads', () => {
     expect(await getRes.text()).toBe('hello world!');
   });
 
+  it('rejects uploadPart and complete when the upload id belongs to another bucket/key', async () => {
+    const otherBucket = `${mpuBucket}-other`;
+    await app.handle(signedRequest({ method: 'PUT', path: `/api/s3/${otherBucket}` }));
+    const initRes = await app.handle(
+      signedRequest({ method: 'POST', path: `/api/s3/${otherBucket}/k2?uploads` }),
+    );
+    const uploadId = (await initRes.text()).match(/<UploadId>([^<]+)<\/UploadId>/)![1]!;
+
+    // Wrong bucket
+    const partRes = await app.handle(
+      signedRequest({
+        method: 'PUT',
+        path: `/api/s3/${mpuBucket}/k1?partNumber=1&uploadId=${uploadId}`,
+        body: 'x',
+      }),
+    );
+    expect(partRes.status).toBe(404);
+    expect(await partRes.text()).toContain('NoSuchUpload');
+
+    // Right bucket, wrong key (part uploaded under the matching URL first)
+    const okPart = await app.handle(
+      signedRequest({
+        method: 'PUT',
+        path: `/api/s3/${otherBucket}/k2?partNumber=1&uploadId=${uploadId}`,
+        body: 'x',
+      }),
+    );
+    const etag = okPart.headers.get('etag')!;
+    const body = `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>${etag}</ETag></Part></CompleteMultipartUpload>`;
+    for (const path of [`/api/s3/${mpuBucket}/k1`, `/api/s3/${otherBucket}/k3`]) {
+      const res = await app.handle(
+        signedRequest({ method: 'POST', path: `${path}?uploadId=${uploadId}`, body }),
+      );
+      expect(res.status).toBe(404);
+      expect(await res.text()).toContain('NoSuchUpload');
+    }
+    const getRes = await app.handle(
+      signedRequest({ method: 'GET', path: `/api/s3/${mpuBucket}/k1` }),
+    );
+    expect(getRes.status).toBe(404);
+  });
+
   it('AbortMultipartUpload cleans up temp parts', async () => {
     const initRes = await app.handle(
       signedRequest({ method: 'POST', path: `/api/s3/${mpuBucket}/aborted.bin?uploads` }),

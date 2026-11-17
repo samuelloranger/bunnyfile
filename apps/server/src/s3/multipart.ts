@@ -6,7 +6,7 @@ import { db } from '../db';
 import { s3MultipartPart, s3MultipartUpload, s3Object } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
-import { absFromRelOrThrow, MULTIPART_ROOT } from '../files/store';
+import { absFromRelOrThrow, DATA_ROOT, MULTIPART_ROOT } from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { trackUpload } from '../inflight';
 import { bodyStream } from './chunked';
@@ -129,13 +129,21 @@ async function createMultipartUpload(
 async function uploadPart(
   request: Request,
   set: { status?: number | string },
+  bucket: string,
+  key: string,
   uploadId: string,
   partNumber: number,
 ): Promise<Response> {
   const upload = db
     .select({ uploadId: s3MultipartUpload.uploadId })
     .from(s3MultipartUpload)
-    .where(eq(s3MultipartUpload.uploadId, uploadId))
+    .where(
+      and(
+        eq(s3MultipartUpload.uploadId, uploadId),
+        eq(s3MultipartUpload.bucket, bucket),
+        eq(s3MultipartUpload.key, key),
+      ),
+    )
     .get();
   if (!upload) return s3Err(set, 404, 'NoSuchUpload', 'Upload not found', uploadId);
 
@@ -158,7 +166,13 @@ async function completeMultipartUpload(
   const upload = db
     .select({ uploadId: s3MultipartUpload.uploadId })
     .from(s3MultipartUpload)
-    .where(eq(s3MultipartUpload.uploadId, uploadId))
+    .where(
+      and(
+        eq(s3MultipartUpload.uploadId, uploadId),
+        eq(s3MultipartUpload.bucket, bucket),
+        eq(s3MultipartUpload.key, key),
+      ),
+    )
     .get();
   if (!upload) return s3Err(set, 404, 'NoSuchUpload', 'Upload not found', pathname);
 
@@ -203,7 +217,7 @@ async function completeMultipartUpload(
     .map((cp) => dbParts.find((p) => p.partNumber === cp.partNumber)!);
 
   const destRel = `s3/${bucket}/${key}`;
-  const destAbs = absFromRelOrThrow(destRel);
+  const destAbs = absFromRelOrThrow(destRel, DATA_ROOT);
   await mkdir(dirname(destAbs), { recursive: true });
   const tmp = `${destAbs}.tmp-${crypto.randomUUID().slice(0, 8)}`;
   const writer = Bun.file(tmp).writer();
@@ -352,7 +366,7 @@ export async function handleMultipart(
     if (Number.isNaN(partNumber) || partNumber < 1 || partNumber > 10000) {
       return s3Err(set, 400, 'InvalidArgument', 'Part number must be 1–10000', url.pathname);
     }
-    return uploadPart(request, set, uploadId, partNumber);
+    return uploadPart(request, set, bucket, key, uploadId, partNumber);
   }
 
   if (method === 'POST' && uploadId) {

@@ -170,7 +170,7 @@ async function readObjectInfo(bucket: string, key: string): Promise<ObjectInfo> 
   const rel = objectRel(bucket, key);
   let opened: Awaited<ReturnType<typeof openStream>>;
   try {
-    opened = await openStream(rel);
+    opened = await openStream(rel, DATA_ROOT);
   } catch (err) {
     if (err instanceof PathError && err.code === 'not_found') {
       throw new BucketError('not_found', `object not found: ${bucket}/${key}`);
@@ -204,7 +204,7 @@ export async function putObject(
   assertObjectKey(key);
   await mkdir(join(S3_ROOT, bucket), { recursive: true });
   const rel = objectRel(bucket, key);
-  const result = await writeUpload(rel, putObjectStream(source));
+  const result = await writeUpload(rel, putObjectStream(source), DATA_ROOT);
   await db
     .insert(s3Object)
     .values({
@@ -250,7 +250,7 @@ export async function openObjectStream(
   const rel = objectRel(bucket, key);
   let opened: Awaited<ReturnType<typeof openStream>>;
   try {
-    opened = await openStream(rel);
+    opened = await openStream(rel, DATA_ROOT);
   } catch (err) {
     if (err instanceof PathError && err.code === 'not_found') {
       throw new BucketError('not_found', `object not found: ${bucket}/${key}`);
@@ -271,7 +271,7 @@ export async function deleteObject(bucket: string, key: string): Promise<void> {
   const bucketDir = join(S3_ROOT, bucket);
   const absObject = join(S3_ROOT, bucket, key);
   try {
-    await removeFile(rel);
+    await removeFile(rel, DATA_ROOT);
     await pruneEmptyParents(dirname(absObject), bucketDir);
   } catch {
     // DELETE is idempotent
@@ -397,7 +397,7 @@ export async function copyObject(
   await ensureBucketExists(srcBucket);
   const srcRel = objectRel(srcBucket, srcKey);
   try {
-    await openStream(srcRel);
+    await openStream(srcRel, DATA_ROOT);
   } catch {
     throw new BucketError('not_found', `object not found: ${srcBucket}/${srcKey}`);
   }
@@ -406,7 +406,7 @@ export async function copyObject(
     .from(s3Object)
     .where(eq(s3Object.path, srcRel))
     .get();
-  const srcMd5 = srcDbRow?.md5 ?? (await hashOnDisk(srcRel, 'md5'));
+  const srcMd5 = srcDbRow?.md5 ?? (await hashOnDisk(srcRel, 'md5', DATA_ROOT));
   const dstRel = objectRel(dstBucket, dstKey);
   await mkdir(join(S3_ROOT, dstBucket), { recursive: true });
   const srcAbs = resolve(DATA_ROOT, srcRel);

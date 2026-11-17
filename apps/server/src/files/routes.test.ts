@@ -211,6 +211,28 @@ describe('files routes', () => {
     const listed = (await s3List.json()) as { entries: Array<{ path: string }> };
     expect(listed.entries.some((e) => e.path.includes('secret'))).toBe(false);
   });
+
+  it('does not let an s3/ path reach S3 object bytes', async () => {
+    const dir = join(process.env.DATA_DIR!, 's3', 'victim');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'obj.txt'), 'original');
+
+    const fd = new FormData();
+    fd.set('path', 's3/victim/obj.txt');
+    fd.set('file', new File(['overwritten'], 'obj.txt', { type: 'text/plain' }));
+    await request('/api/files/upload', { method: 'POST', body: fd });
+
+    // S3 bytes untouched; the upload landed in the user's files tree instead.
+    expect(await Bun.file(join(dir, 'obj.txt')).text()).toBe('original');
+    expect(await Bun.file(join(process.env.DATA_DIR!, 'files', 's3/victim/obj.txt')).text()).toBe(
+      'overwritten',
+    );
+
+    const content = await request(
+      `/api/files/content?path=${encodeURIComponent('s3/victim/obj.txt')}`,
+    );
+    expect(await content.text()).toBe('overwritten');
+  });
 });
 
 afterAll(async () => {
