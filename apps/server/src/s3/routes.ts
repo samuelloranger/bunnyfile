@@ -408,7 +408,7 @@ function createS3Handler() {
     if (request.method === 'GET' || request.method === 'HEAD') {
       let opened: Awaited<ReturnType<typeof openStream>>;
       try {
-        opened = await openStream(rel);
+        opened = await openStream(rel, DATA_ROOT);
       } catch {
         return s3Err(set, 404, 'NoSuchKey', 'Object not found', pathname);
       }

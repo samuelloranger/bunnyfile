@@ -28,25 +28,17 @@ export class PathError extends Error {
 }
 
 /**
- * Resolve a relative path for user files (under FILES_ROOT) or S3 objects
- * (`s3/...` under DATA_ROOT). Trash/shares use dedicated helpers.
+ * Resolve a validated relative path under `root`. The files API always uses
+ * FILES_ROOT; only the S3 layer passes DATA_ROOT (its `s3/...` rels). The root
+ * is chosen by the caller, never inferred from the path, so a user path that
+ * starts with `s3/` stays inside FILES_ROOT.
  */
-function abs(rel: string): string {
-  if (rel === 's3' || rel.startsWith('s3/')) {
-    const p = resolveInRoot(DATA_ROOT, rel);
-    if (p == null) throw new PathError('traversal', `unsafe path: ${rel}`);
-    return p;
-  }
-  const p = resolveInRoot(FILES_ROOT, rel);
-  if (p == null) throw new PathError('traversal', `unsafe path: ${rel}`);
-  return p;
-}
-
-/** Resolve a relative path to absolute, after validating it. */
-export function absFromRelOrThrow(raw: string): string {
+export function absFromRelOrThrow(raw: string, root: string = FILES_ROOT): string {
   const rel = safeRelPath(raw);
   if (rel == null) throw new PathError('traversal', `invalid path: ${raw}`);
-  return abs(rel);
+  const p = resolveInRoot(root, rel);
+  if (p == null) throw new PathError('traversal', `unsafe path: ${rel}`);
+  return p;
 }
 
 function trashAbs(trashRel: string): string {
@@ -76,15 +68,17 @@ function assertNotRoot(rel: string): void {
 export function writeUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
+  root: string = FILES_ROOT,
 ): Promise<{ size: number; sha256: string; md5: string; mtimeMs: number; inode: number }> {
-  return trackUpload(doWriteUpload(rel, stream));
+  return trackUpload(doWriteUpload(rel, stream, root));
 }
 
 async function doWriteUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
+  root: string,
 ): Promise<{ size: number; sha256: string; md5: string; mtimeMs: number; inode: number }> {
-  const destination = absFromRelOrThrow(rel);
+  const destination = absFromRelOrThrow(rel, root);
   await mkdir(dirname(destination), { recursive: true });
 
   // Dot-prefixed temp in the same directory: the scanner already skips all
@@ -176,8 +170,8 @@ async function doWriteUpload(
   };
 }
 
-export async function openStream(rel: string) {
-  const path = absFromRelOrThrow(rel);
+export async function openStream(rel: string, root: string = FILES_ROOT) {
+  const path = absFromRelOrThrow(rel, root);
   let st: Awaited<ReturnType<typeof stat>>;
   try {
     st = await stat(path);
@@ -215,9 +209,9 @@ export function readRange(path: string, start: number, end: number): ReadableStr
     .stream();
 }
 
-export async function removeFile(rel: string): Promise<void> {
+export async function removeFile(rel: string, root: string = FILES_ROOT): Promise<void> {
   assertNotRoot(rel);
-  const path = absFromRelOrThrow(rel);
+  const path = absFromRelOrThrow(rel, root);
   let st: Awaited<ReturnType<typeof stat>>;
   try {
     st = await stat(path);
@@ -381,8 +375,9 @@ export async function listImmediateDirectories(relPrefix: string): Promise<strin
 export async function hashOnDisk(
   rel: string,
   algorithm: 'sha256' | 'md5' = 'sha256',
+  root: string = FILES_ROOT,
 ): Promise<string> {
-  const path = absFromRelOrThrow(rel);
+  const path = absFromRelOrThrow(rel, root);
   const node = createReadStream(path);
   const h = createHash(algorithm);
   for await (const chunk of node) {
