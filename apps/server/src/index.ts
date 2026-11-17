@@ -2,7 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { APP_NAME, type HealthStatus } from '@bunnyfile/shared';
 import { cors } from '@elysiajs/cors';
-import { swagger } from '@elysiajs/swagger';
+import { openapi } from '@elysiajs/openapi';
 import { count } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { auth } from './auth/auth';
@@ -40,7 +40,7 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
     recordHttpRequest();
   })
   .use(
-    swagger({
+    openapi({
       path: '/api/docs',
       documentation: {
         info: { title: 'BunnyFile API', version },
@@ -51,7 +51,7 @@ export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
           { name: 'settings', description: 'Settings and access keys' },
         ],
       },
-      exclude: [/^\/api\/s3/, /^\/api\/auth/],
+      exclude: { paths: [/^\/api\/s3/, /^\/api\/auth/] },
     }),
   )
   .use(
