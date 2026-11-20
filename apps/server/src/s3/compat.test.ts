@@ -470,6 +470,28 @@ describe('S3 client compatibility', () => {
   });
 
   describe('listing', () => {
+    it('lists keys with dot-prefixed segments but hides in-flight temp files', async () => {
+      const bucket = `compat-dot-${crypto.randomUUID().slice(0, 8)}`;
+      await createBucket(bucket);
+      for (const key of ['.env', '.git/config', 'dir/.hidden/x.txt', 'plain.txt']) {
+        await putObject(bucket, key, 'x');
+      }
+      // What an interrupted upload leaves behind next to its destination.
+      await writeFile(
+        join(process.env.DATA_DIR!, 's3', bucket, '.plain.txt.tmp-1a2b3c4d'),
+        'partial',
+      );
+      expect((await listObjectKeys(bucket)).sort()).toEqual(
+        ['.env', '.git/config', 'dir/.hidden/x.txt', 'plain.txt'].sort(),
+      );
+      for (const key of ['.env', '.git/config', 'dir/.hidden/x.txt', 'plain.txt']) {
+        await deleteObject(bucket, key);
+      }
+      expect(await listObjectKeys(bucket)).toEqual([]);
+      // Only the orphaned temp is left: the bucket counts as empty.
+      await deleteBucket(bucket);
+    });
+
     it('URL-encodes keys when encoding-type=url is requested (AWS CLI default)', async () => {
       const bucket = `compat-enc-${crypto.randomUUID().slice(0, 8)}`;
       await createBucket(bucket);
