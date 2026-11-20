@@ -154,35 +154,49 @@ export async function verifySigV4(request: Request, config: SigV4Config): Promis
 
   const payloadHash = request.headers.get('x-amz-content-sha256') ?? 'UNSIGNED-PAYLOAD';
   const signedHeaderNames = [...parsed.signedHeaders].sort();
-  const canonicalHeaders = signedHeaderNames
-    .map((name) => {
-      const value = request.headers.get(name);
-      return `${name}:${(value ?? '').trim().replace(/\s+/g, ' ')}`;
-    })
-    .join('\n');
-
   const url = new URL(request.url);
-  const canonicalRequest = [
-    request.method.toUpperCase(),
-    canonicalUri(url.pathname),
-    canonicalQuery(url),
-    `${canonicalHeaders}\n`,
-    signedHeaderNames.join(';'),
-    payloadHash,
-  ].join('\n');
-
-  const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    expectedScope,
-    sha256Hex(canonicalRequest),
-  ].join('\n');
-
   const signingKey = deriveSigningKey(secretAccessKey, dateStamp, config.region, config.service);
-  const expectedSignature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
-  const left = Buffer.from(expectedSignature, 'utf8');
-  const right = Buffer.from(parsed.signature, 'utf8');
-  if (left.length !== right.length || !timingSafeEqual(left, right)) {
+
+  const signatureFor = (headerValue: (name: string) => string | null) => {
+    const canonicalHeaders = signedHeaderNames
+      .map((name) => `${name}:${(headerValue(name) ?? '').trim().replace(/\s+/g, ' ')}`)
+      .join('\n');
+    const canonicalRequest = [
+      request.method.toUpperCase(),
+      canonicalUri(url.pathname),
+      canonicalQuery(url),
+      `${canonicalHeaders}\n`,
+      signedHeaderNames.join(';'),
+      payloadHash,
+    ].join('\n');
+    const stringToSign = [
+      'AWS4-HMAC-SHA256',
+      amzDate,
+      expectedScope,
+      sha256Hex(canonicalRequest),
+    ].join('\n');
+    return createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+  };
+  const matches = (expected: string) => {
+    const left = Buffer.from(expected, 'utf8');
+    const right = Buffer.from(parsed.signature, 'utf8');
+    return left.length === right.length && timingSafeEqual(left, right);
+  };
+
+  let expectedSignature = signatureFor((name) => request.headers.get(name));
+  // The AWS SDK for Go v2 (rclone, Go apps) signs `Accept-Encoding: identity`,
+  // and proxies such as Cloudflare rewrite that header in transit. Retry with
+  // the value the client sent; it still has to be signed with the secret key.
+  if (
+    !matches(expectedSignature) &&
+    signedHeaderNames.includes('accept-encoding') &&
+    request.headers.get('accept-encoding') !== 'identity'
+  ) {
+    expectedSignature = signatureFor((name) =>
+      name === 'accept-encoding' ? 'identity' : request.headers.get(name),
+    );
+  }
+  if (!matches(expectedSignature)) {
     return asErr('SignatureDoesNotMatch', 'The request signature we calculated does not match');
   }
 
