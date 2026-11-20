@@ -3,3 +3,10 @@ DOMAIN {
 	encode gzip zstd
 	reverse_proxy bunnyfile:3001
 }
+
+# Optional: the S3 API at the root of its own hostname, for restic, kopia and
+# mc. Set S3_DOMAIN in .env to the same name. No `encode` here: compressing S3
+# responses breaks Content-Length and Range for clients.
+# S3_DOMAIN {
+# 	reverse_proxy bunnyfile:3001
+# }

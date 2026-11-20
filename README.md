@@ -90,7 +90,7 @@ Designed to be safe behind a reverse proxy. What's in the box:
 
 ## S3-compatible API
 
-BunnyFile speaks enough S3 for rclone, aws-cli, restic, and kopia. The API lives at `/api/s3` on the same host as the web app.
+BunnyFile speaks enough S3 for rclone, aws-cli, restic, and kopia. The API lives at `/api/s3` on the same host as the web app; restic, kopia and `mc` need it at the root of its own hostname, which `S3_DOMAIN` enables.
 
 **Quick rclone config:**
 
