@@ -1,7 +1,7 @@
 import { stat, statfs } from 'node:fs/promises';
 import { desc, eq, sql } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
-import { auth } from '../auth/auth';
+import { authGuard } from '../auth/guard';
 import { db } from '../db';
 import { fileIndex, thumbnail, trashItem } from '../db/schema';
 import { addSseClient, removeSseClient } from './events';
@@ -115,10 +115,6 @@ function escapeLike(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
-async function callerFromRequest(request: Request) {
-  return auth.api.getSession({ headers: request.headers });
-}
-
 function libraryActor(user: { id: string; role?: string | null | undefined }): {
   userId: string;
   role?: string | null;
@@ -199,14 +195,11 @@ function paginate<T>(items: T[], offset: number, limit: number) {
 }
 
 export const filesRoutes = new Elysia({ name: 'files' })
+  .use(authGuard)
+  .guard({ auth: true })
   .get(
     '/api/files',
-    async ({ request, query, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ query, set }) => {
       const prefix = userRel(query.prefix ?? '');
       if (prefix == null) {
         set.status = 400;
@@ -230,26 +223,15 @@ export const filesRoutes = new Elysia({ name: 'files' })
     },
   )
 
-  .post('/api/files/rescan', async ({ request, set }) => {
-    const s = await callerFromRequest(request);
-    if (!s?.user) {
-      set.status = 401;
-      return { error: 'unauthorized' as const };
-    }
-    if (s.user.role !== 'admin') {
+  .post('/api/files/rescan', async ({ set, user }) => {
+    if (user.role !== 'admin') {
       set.status = 403;
       return { error: 'forbidden' as const };
     }
     return await scan();
   })
 
-  .get('/api/files/usage', async ({ request, set }) => {
-    const s = await callerFromRequest(request);
-    if (!s?.user) {
-      set.status = 401;
-      return { error: 'unauthorized' as const };
-    }
-
+  .get('/api/files/usage', async () => {
     const [row] = await db
       .select({
         usedBytes: sql<number>`coalesce(sum(${fileIndex.size}), 0)`,
@@ -279,13 +261,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .get(
     '/api/files/recent',
-    async ({ request, query, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
-
+    async ({ query }) => {
       const limit = Math.min(Math.max(query.limit ?? 10, 1), 50);
       const rows = await db
         .select({
@@ -309,12 +285,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .get(
     '/api/files/search',
-    async ({ request, query, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ query, set }) => {
       const q = query.q?.trim() ?? '';
       if (q.length < 2) {
         set.status = 400;
@@ -334,12 +305,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .post(
     '/api/files/folder',
-    async ({ request, body, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ body, set }) => {
       const path = userRel(body.path);
       if (!path) {
         set.status = 400;
@@ -365,19 +331,14 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .delete(
     '/api/files/folder',
-    async ({ request, body, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ body, set, user }) => {
       const path = userRel(body.path);
       if (!path) {
         set.status = 400;
         return { error: 'invalid path' as const };
       }
       try {
-        await trashFolder(path, s.user.id);
+        await trashFolder(path, user.id);
         return { ok: true as const };
       } catch (err) {
         return mapMutationError(err, set);
@@ -389,13 +350,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
   )
 
   // SSE stream — pushes a `files-changed` event whenever the index changes.
-  .get('/api/files/events', async ({ request, set }): Promise<Response | { error: string }> => {
-    const s = await callerFromRequest(request);
-    if (!s?.user) {
-      set.status = 401;
-      return { error: 'unauthorized' };
-    }
-
+  .get('/api/files/events', async () => {
     const enc = new TextEncoder();
     let ctrl!: ReadableStreamDefaultController<Uint8Array>;
     let heartbeat: ReturnType<typeof setInterval>;
@@ -435,13 +390,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
   //   - path: target path (folders auto-created)
   .post(
     '/api/files/upload',
-    async ({ request, body, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
-
+    async ({ body, set, user }) => {
       const target = userRel(body.path);
       if (!target) {
         set.status = 400;
@@ -455,7 +404,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
       try {
         return await upload(target, body.file.stream(), {
           ...(body.file.type ? { mime: body.file.type } : {}),
-          uploadedByUserId: s.user.id,
+          uploadedByUserId: user.id,
         });
       } catch (err) {
         if (err instanceof PathError || err instanceof LibraryError) {
@@ -478,11 +427,6 @@ export const filesRoutes = new Elysia({ name: 'files' })
   .get(
     '/api/files/content',
     async ({ request, query, set }): Promise<Response | { error: string }> => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' };
-      }
       const path = userRel(query.path);
       if (!path) {
         set.status = 404;
@@ -569,12 +513,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .get(
     '/api/files/archive',
-    async ({ request, query, set }): Promise<Response | { error: string }> => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ query, set }): Promise<Response | { error: string }> => {
       const path = userRel(query.path);
       if (!path) {
         set.status = 400;
@@ -610,12 +549,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .get(
     '/api/files/thumbnail',
-    async ({ request, query, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return new Response('unauthorized', { status: 401 });
-      }
+    async ({ query, set }) => {
       const rel = userRel(query.path);
       if (!rel) {
         set.status = 400;
@@ -632,13 +566,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
     { query: t.Object({ path: t.String() }) },
   )
 
-  .get('/api/trash', async ({ request, set }) => {
-    const s = await callerFromRequest(request);
-    if (!s?.user) {
-      set.status = 401;
-      return { error: 'unauthorized' as const };
-    }
-
+  .get('/api/trash', async ({ user }) => {
     const rows = await db
       .select({
         id: trashItem.id,
@@ -649,52 +577,34 @@ export const filesRoutes = new Elysia({ name: 'files' })
         deletedAt: trashItem.deletedAt,
       })
       .from(trashItem)
-      .where(s.user.role === 'admin' ? undefined : eq(trashItem.deletedByUserId, s.user.id))
+      .where(user.role === 'admin' ? undefined : eq(trashItem.deletedByUserId, user.id))
       .orderBy(desc(trashItem.deletedAt))
       .limit(200);
 
     return { entries: rows };
   })
 
-  .post('/api/trash/:id/restore', async ({ request, params, set }) => {
-    const s = await callerFromRequest(request);
-    if (!s?.user) {
-      set.status = 401;
-      return { error: 'unauthorized' as const };
-    }
-
+  .post('/api/trash/:id/restore', async ({ params, set, user }) => {
     try {
-      const { path: restoredPath } = await restore(params.id, libraryActor(s.user));
+      const { path: restoredPath } = await restore(params.id, libraryActor(user));
       return { ok: true as const, path: restoredPath };
     } catch (err) {
       return mapMutationError(err, set);
     }
   })
 
-  .delete('/api/trash/:id', async ({ request, params, set }) => {
-    const s = await callerFromRequest(request);
-    if (!s?.user) {
-      set.status = 401;
-      return { error: 'unauthorized' as const };
-    }
-
+  .delete('/api/trash/:id', async ({ params, set, user }) => {
     try {
-      await remove(params.id, libraryActor(s.user));
+      await remove(params.id, libraryActor(user));
       return { ok: true as const };
     } catch (err) {
       return mapMutationError(err, set);
     }
   })
 
-  .delete('/api/trash', async ({ request, set }) => {
-    const s = await callerFromRequest(request);
-    if (!s?.user) {
-      set.status = 401;
-      return { error: 'unauthorized' as const };
-    }
-
+  .delete('/api/trash', async ({ set, user }) => {
     try {
-      const { removed } = await emptyTrash(libraryActor(s.user));
+      const { removed } = await emptyTrash(libraryActor(user));
       return { ok: true as const, removed };
     } catch (err) {
       return mapMutationError(err, set);
@@ -703,12 +613,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .post(
     '/api/files/thumbnail',
-    async ({ request, query, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ query, set }) => {
       const rel = userRel(query.path);
       if (!rel) {
         set.status = 400;
@@ -735,12 +640,7 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .patch(
     '/api/files',
-    async ({ request, body, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ body, set }) => {
       const path = userRel(body.path);
       const newPath = userRel(body.newPath);
       if (!path || !newPath) {
@@ -764,19 +664,14 @@ export const filesRoutes = new Elysia({ name: 'files' })
 
   .delete(
     '/api/files',
-    async ({ request, body, set }) => {
-      const s = await callerFromRequest(request);
-      if (!s?.user) {
-        set.status = 401;
-        return { error: 'unauthorized' as const };
-      }
+    async ({ body, set, user }) => {
       const path = userRel(body.path);
       if (!path) {
         set.status = 400;
         return { error: 'invalid path' as const };
       }
       try {
-        await trashFile(path, s.user.id);
+        await trashFile(path, user.id);
         return { ok: true as const };
       } catch (err) {
         return mapMutationError(err, set);

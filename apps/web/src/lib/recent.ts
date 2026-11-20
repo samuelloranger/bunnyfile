@@ -15,7 +15,6 @@ export const recentFilesQuery = (limit = 8) =>
     queryFn: async () => {
       const { data, error } = await api.api.files.recent.get({ query: { limit } });
       if (error) throw error;
-      if ('error' in data) throw new Error(data.error);
       return data.entries as RecentEntry[];
     },
     refetchInterval: 10_000,

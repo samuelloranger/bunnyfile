@@ -9,12 +9,13 @@ process.env.DB_PATH = join(testRoot, 'test.sqlite');
 process.env.DATA_DIR = join(testRoot, 'data');
 process.env.BETTER_AUTH_SECRET = 'test-secret';
 
+let signedIn = true;
+
 mock.module('../auth/auth', () => ({
   auth: {
     api: {
-      getSession: async () => ({
-        user: { id: 'files-test-user', role: 'admin' },
-      }),
+      getSession: async () =>
+        signedIn ? { user: { id: 'files-test-user', role: 'admin' } } : null,
     },
   },
 }));
@@ -232,6 +233,28 @@ describe('files routes', () => {
       `/api/files/content?path=${encodeURIComponent('s3/victim/obj.txt')}`,
     );
     expect(await content.text()).toBe('overwritten');
+  });
+
+  it('rejects every route without a session', async () => {
+    signedIn = false;
+    try {
+      const routes: Array<[string, string]> = [
+        ['GET', '/api/files'],
+        ['GET', '/api/files/usage'],
+        ['GET', '/api/files/events'],
+        ['GET', '/api/files/content?path=a.txt'],
+        ['GET', '/api/files/thumbnail?path=a.png'],
+        ['GET', '/api/trash'],
+        ['DELETE', '/api/trash'],
+      ];
+      for (const [method, path] of routes) {
+        const res = await request(path, { method });
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ error: 'unauthorized' });
+      }
+    } finally {
+      signedIn = true;
+    }
   });
 });
 
