@@ -345,6 +345,52 @@ describe('S3 client compatibility', () => {
     });
   });
 
+  describe('DeleteObjects body handling', () => {
+    const bucket = `compat-del-${crypto.randomUUID().slice(0, 8)}`;
+    beforeAll(() => createBucket(bucket));
+    const del = (body: string) =>
+      app.handle(signedRequest({ method: 'POST', path: `/api/s3/${bucket}?delete`, body }));
+
+    it.each([
+      [
+        'an out-of-range character reference',
+        '<Delete><Object><Key>&#x110000;</Key></Object></Delete>',
+      ],
+      ['a NUL character reference', '<Delete><Object><Key>a&#0;b</Key></Object></Delete>'],
+      ['CDATA', '<Delete><Object><Key><![CDATA[a]]></Key></Object></Delete>'],
+      ['an unterminated object', '<Delete><Object><Key>a</Key></Delete>'],
+    ])('rejects %s with MalformedXML', async (_, body) => {
+      const res = await del(body);
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain('<Code>MalformedXML</Code>');
+    });
+
+    it('answers a pathological body quickly instead of backtracking', async () => {
+      const started = performance.now();
+      const res = await del(`<Delete>${'<Object '.repeat(200_000)}</Delete>`);
+      expect(res.status).toBe(400);
+      expect(performance.now() - started).toBeLessThan(1000);
+    });
+
+    it('rejects bodies over 2 MiB', async () => {
+      const res = await del(`<Delete>${' '.repeat(3 * 1024 * 1024)}</Delete>`);
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain('<Code>MaxMessageLengthExceeded</Code>');
+    });
+
+    it('refuses versioned deletes per key and keeps the object', async () => {
+      await putObject(bucket, 'versioned.txt', 'still here');
+      const res = await del(
+        '<Delete><Object><Key>versioned.txt</Key><VersionId>3HL4kqtJlcpXroDTDmJ</VersionId></Object></Delete>',
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('<Code>NotImplemented</Code>');
+      expect(new TextDecoder().decode(await getObjectBytes(bucket, 'versioned.txt'))).toBe(
+        'still here',
+      );
+    });
+  });
+
   describe('rclone integration', () => {
     let serverProc: ReturnType<typeof Bun.spawn> | null = null;
     let port = 0;

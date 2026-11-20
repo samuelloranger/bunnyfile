@@ -25,6 +25,7 @@ export class PayloadError extends Error {
       | 'IncompleteBody'
       | 'InvalidDigest'
       | 'InvalidRequest'
+      | 'MaxMessageLengthExceeded'
       | 'SignatureDoesNotMatch',
     message: string,
   ) {
@@ -264,7 +265,10 @@ type Expectation = { label: string; check: Checksum; expected: () => string | un
 export function payloadStream(
   request: Request,
   signing?: SigningContext,
-  { checksumHeaders = true }: { checksumHeaders?: boolean } = {},
+  {
+    checksumHeaders = true,
+    maxBytes = Number.POSITIVE_INFINITY,
+  }: { checksumHeaders?: boolean; maxBytes?: number } = {},
 ): ReadableStream<Uint8Array> {
   const raw = request.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() });
   const mode = chunkedMode(request);
@@ -326,6 +330,9 @@ export function payloadStream(
         const { done, value } = await pieces.next();
         if (!done) {
           size += value.length;
+          if (size > maxBytes) {
+            throw new PayloadError('MaxMessageLengthExceeded', 'Your request was too big');
+          }
           sha?.update(value);
           for (const e of expectations) e.check.update(value);
           controller.enqueue(value);
@@ -382,7 +389,7 @@ async function* streamPieces(stream: ReadableStream<Uint8Array>): AsyncGenerator
 export async function payloadText(
   request: Request,
   signing?: SigningContext,
-  options?: { checksumHeaders?: boolean },
+  options?: { checksumHeaders?: boolean; maxBytes?: number },
 ): Promise<string> {
   return new Response(payloadStream(request, signing, options)).text();
 }

@@ -41,6 +41,7 @@ The console uses session cookies (`/api/s3-console/*`), not SigV4. Empty folders
 | `GetObject` | Full object + HTTP Range (including suffix ranges) |
 | `HeadObject` | Metadata + `ETag` |
 | `DeleteObject` | Idempotent |
+| `DeleteObjects` | Batch delete of up to 1000 keys (`POST /{bucket}?delete`), including quiet mode |
 | `ListObjects` / `ListObjectsV2` | Prefix, delimiter, pagination (`marker` / `continuation-token`) |
 | Multipart upload | `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListParts` |
 | `CopyObject` | Via `x-amz-copy-source` on `PUT` |

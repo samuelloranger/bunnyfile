@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import {
   CreateBucketCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
@@ -163,5 +164,34 @@ describe('AWS SDK for JavaScript over HTTPS', () => {
     );
     expect((await fetch(url, { method: 'PUT', body: 'via presigned PUT' })).status).toBe(200);
     expect(await text('presigned-put.txt')).toBe('via presigned PUT');
+  });
+
+  it('deletes a batch with DeleteObjects, including XML-special keys', async () => {
+    const keys = ['batch/a.txt', 'batch/b & <c>.txt', 'batch/it\'s "quoted".txt'];
+    for (const Key of keys) {
+      await s3.send(new PutObjectCommand({ Bucket: bucket, Key, Body: 'x' }));
+    }
+    const res = await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: [...keys, 'batch/missing.txt'].map((Key) => ({ Key })) },
+      }),
+    );
+    expect(res.Errors ?? []).toEqual([]);
+    expect(res.Deleted?.map((d) => d.Key).sort()).toEqual([...keys, 'batch/missing.txt'].sort());
+    const left = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: 'batch/' }));
+    expect(left.KeyCount).toBe(0);
+  });
+
+  it('omits successful deletes in DeleteObjects quiet mode', async () => {
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: 'quiet.txt', Body: 'x' }));
+    const res = await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: [{ Key: 'quiet.txt' }], Quiet: true },
+      }),
+    );
+    expect(res.Deleted ?? []).toEqual([]);
+    expect(res.Errors ?? []).toEqual([]);
   });
 });
