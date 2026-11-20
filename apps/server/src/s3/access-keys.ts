@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
 import { and, eq } from 'drizzle-orm';
 import Elysia, { t } from 'elysia';
 import { auth } from '../auth/auth';
+import { authGuard } from '../auth/guard';
 import { db } from '../db';
 import { s3AccessKey } from '../db/schema';
 
@@ -70,6 +71,11 @@ export function lookupS3SecretKey(accessKeyId: string): string | null {
 }
 
 export const accessKeyRoutes = new Elysia({ name: 's3-access-keys' })
+  .use(authGuard)
+  // The root-of-host S3 endpoint (S3_DOMAIN), shown next to /api/s3 in the UI.
+  .get('/api/settings/s3-endpoint', () => ({ s3Domain: Bun.env.S3_DOMAIN?.trim() || null }), {
+    auth: true,
+  })
   .get('/api/settings/s3-keys', async ({ request, set }) => {
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session?.user) {
