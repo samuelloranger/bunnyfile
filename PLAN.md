@@ -118,6 +118,7 @@ Single Bun process, single Docker container in production.
 | **No realtime collab** | Reduces scope by 80%, removes need for CRDT/Operational Transform |
 | **Auth delegation** | Native auth (done) or forward-auth from Tinyauth/Caddy (todo). Not both at the same time. |
 | **Upload progress UX (XHR `onprogress`)** | Immediate user feedback with minimal backend complexity |
+| **Shared workspace, global S3 buckets** | Every signed-in user sees the whole files tree and any valid access key reaches every bucket. Per-user or per-bucket key scoping is fine-grained RBAC (a non-goal); run separate instances when tenants need isolation. `uploadedByUserId` is attribution, not an ACL. |
 
 ### Tech stack
 
