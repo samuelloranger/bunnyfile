@@ -469,6 +469,42 @@ describe('S3 client compatibility', () => {
     });
   });
 
+  describe('requests rewritten by a proxy', () => {
+    const ping = (
+      signHeaders: Record<string, string>,
+      headers: Record<string, string>,
+      secretAccessKey?: string,
+    ) =>
+      app.handle(
+        signedRequest({
+          method: 'GET',
+          path: '/api/s3/_ping',
+          signHeaders,
+          headers,
+          ...(secretAccessKey ? { secretAccessKey } : {}),
+        }),
+      );
+
+    it('accepts a signed Accept-Encoding: identity that a proxy rewrote (Cloudflare + AWS Go SDK)', async () => {
+      const res = await ping({ 'accept-encoding': 'identity' }, { 'accept-encoding': 'gzip, br' });
+      expect(res.status).toBe(200);
+    });
+
+    it('still rejects other rewritten signed headers', async () => {
+      const res = await ping({ 'accept-encoding': 'gzip' }, { 'accept-encoding': 'br' });
+      expect(res.status).toBe(403);
+    });
+
+    it('still rejects a wrong secret on the identity retry', async () => {
+      const res = await ping(
+        { 'accept-encoding': 'identity' },
+        { 'accept-encoding': 'gzip, br' },
+        'not-the-secret',
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
   describe('listing', () => {
     it('lists keys with dot-prefixed segments but hides in-flight temp files', async () => {
       const bucket = `compat-dot-${crypto.randomUUID().slice(0, 8)}`;

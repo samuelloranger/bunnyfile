@@ -31,6 +31,8 @@ export type SignedRequestOptions = {
   signatureSuffix?: string;
   /** Extra unsigned headers (the server only canonicalizes SignedHeaders). */
   headers?: Record<string, string>;
+  /** Extra headers included in the signature (lowercase names). */
+  signHeaders?: Record<string, string>;
   accessKeyId?: string;
   secretAccessKey?: string;
   region?: string;
@@ -42,6 +44,7 @@ export function signedRequest({
   body,
   signatureSuffix = '',
   headers = {},
+  signHeaders = {},
   accessKeyId = process.env.S3_ACCESS_KEY_ID!,
   secretAccessKey = process.env.S3_SECRET_ACCESS_KEY!,
   region = process.env.S3_REGION ?? 'us-east-1',
@@ -57,8 +60,15 @@ export function signedRequest({
   const payloadHash = 'UNSIGNED-PAYLOAD';
   const url = new URL(`http://${host}${path}`);
   const canonicalQuery = canonicalQueryString(url);
-  const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
-  const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+  const signed: Record<string, string> = {
+    host,
+    'x-amz-content-sha256': payloadHash,
+    'x-amz-date': amzDate,
+    ...signHeaders,
+  };
+  const names = Object.keys(signed).sort();
+  const canonicalHeaders = names.map((n) => `${n}:${signed[n]}\n`).join('');
+  const signedHeaders = names.join(';');
   const canonicalRequest = [
     method,
     canonicalUri(url.pathname),
@@ -77,6 +87,7 @@ export function signedRequest({
     method,
     body,
     headers: {
+      ...signHeaders,
       ...headers,
       authorization,
       host,
