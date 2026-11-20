@@ -11,6 +11,7 @@ import {
   PathError,
   removeFile,
   S3_ROOT,
+  withCommitLock,
   writeUpload,
 } from '../files/store';
 
@@ -188,36 +189,58 @@ async function readObjectInfo(bucket: string, key: string): Promise<ObjectInfo> 
   };
 }
 
+/** The ETag S3 clients see for an object, without quotes. */
+export function objectEtag(info: ObjectInfo): string {
+  return info.md5 || `${info.size}-${info.mtimeMs}`;
+}
+
+/** The current object's ETag, or null when there is no object at the key. */
+export async function currentEtag(bucket: string, key: string): Promise<string | null> {
+  try {
+    return objectEtag(await readObjectInfo(bucket, key));
+  } catch (err) {
+    if (err instanceof BucketError) return null;
+    throw err;
+  }
+}
+
+/** Records an object's metadata after its bytes were committed. */
+async function upsertObjectRow(
+  bucket: string,
+  key: string,
+  row: { size: number; mtimeMs: number; inode: number; md5: string },
+): Promise<void> {
+  const path = objectRel(bucket, key);
+  await db
+    .insert(s3Object)
+    .values({ path, bucket, key, ...row })
+    .onConflictDoUpdate({ target: s3Object.path, set: row });
+}
+
+/**
+ * Writes an object. `precondition` receives the current ETag (null when the key
+ * is free) under the commit lock and may throw to abort the write.
+ */
 export async function putObject(
   bucket: string,
   key: string,
   body: ReadableStream<Uint8Array>,
+  precondition?: (currentEtag: string | null) => void,
 ): Promise<ObjectInfo> {
   assertBucketName(bucket);
   assertObjectKey(key);
   await mkdir(join(S3_ROOT, bucket), { recursive: true });
   const rel = objectRel(bucket, key);
-  const result = await writeUpload(rel, body, DATA_ROOT);
-  await db
-    .insert(s3Object)
-    .values({
-      path: rel,
-      bucket,
-      key,
-      size: result.size,
-      mtimeMs: result.mtimeMs,
-      inode: result.inode,
-      md5: result.md5,
-    })
-    .onConflictDoUpdate({
-      target: s3Object.path,
-      set: {
-        size: result.size,
-        mtimeMs: result.mtimeMs,
-        inode: result.inode,
-        md5: result.md5,
-      },
-    });
+  const result = await writeUpload(rel, body, DATA_ROOT, {
+    beforeCommit: async () => precondition?.(await currentEtag(bucket, key)),
+    afterCommit: (info) =>
+      upsertObjectRow(bucket, key, {
+        size: info.size,
+        mtimeMs: info.mtimeMs,
+        inode: info.inode,
+        md5: info.md5,
+      }),
+  });
   return {
     key,
     size: result.size,
@@ -263,13 +286,17 @@ export async function deleteObject(bucket: string, key: string): Promise<void> {
   const rel = objectRel(bucket, key);
   const bucketDir = join(S3_ROOT, bucket);
   const absObject = join(S3_ROOT, bucket, key);
-  try {
-    await removeFile(rel, DATA_ROOT);
-    await pruneEmptyParents(dirname(absObject), bucketDir);
-  } catch {
-    // DELETE is idempotent
-  }
-  await db.delete(s3Object).where(eq(s3Object.path, rel));
+  // Same lock as writes, so a conditional write's check cannot be overtaken
+  // by a delete between its check and its rename.
+  await withCommitLock(resolve(DATA_ROOT, rel), async () => {
+    try {
+      await removeFile(rel, DATA_ROOT);
+      await pruneEmptyParents(dirname(absObject), bucketDir);
+    } catch {
+      // DELETE is idempotent
+    }
+    await db.delete(s3Object).where(eq(s3Object.path, rel));
+  });
 }
 
 export type ListObjectsInput = {
@@ -382,6 +409,7 @@ export async function copyObject(
   srcKey: string,
   dstBucket: string,
   dstKey: string,
+  precondition?: (currentEtag: string | null) => void,
 ): Promise<ObjectInfo> {
   assertBucketName(srcBucket);
   assertBucketName(dstBucket);
@@ -407,28 +435,23 @@ export async function copyObject(
   await mkdir(dirname(destAbs), { recursive: true });
   const tmp = `${destAbs}.tmp-${crypto.randomUUID().slice(0, 8)}`;
   await copyFile(srcAbs, tmp);
-  await rename(tmp, destAbs);
-  const destStat = await stat(destAbs);
-  await db
-    .insert(s3Object)
-    .values({
-      path: dstRel,
-      bucket: dstBucket,
-      key: dstKey,
-      size: destStat.size,
-      mtimeMs: Math.round(destStat.mtimeMs),
-      inode: Number(destStat.ino),
+  const destStat = await withCommitLock(destAbs, async () => {
+    try {
+      precondition?.(await currentEtag(dstBucket, dstKey));
+      await rename(tmp, destAbs);
+    } catch (err) {
+      await rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
+    const st = await stat(destAbs);
+    await upsertObjectRow(dstBucket, dstKey, {
+      size: st.size,
+      mtimeMs: Math.round(st.mtimeMs),
+      inode: Number(st.ino),
       md5: srcMd5,
-    })
-    .onConflictDoUpdate({
-      target: s3Object.path,
-      set: {
-        size: destStat.size,
-        mtimeMs: Math.round(destStat.mtimeMs),
-        inode: Number(destStat.ino),
-        md5: srcMd5,
-      },
     });
+    return st;
+  });
   return {
     key: dstKey,
     size: destStat.size,
