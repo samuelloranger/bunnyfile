@@ -417,6 +417,38 @@ async function listParts(
   );
 }
 
+/** ListMultipartUploads: in-progress uploads in a bucket, oldest first. */
+export async function listMultipartUploads(bucket: string, prefix: string): Promise<Response> {
+  const uploads = db
+    .select()
+    .from(s3MultipartUpload)
+    .where(eq(s3MultipartUpload.bucket, bucket))
+    .all()
+    .filter((u) => u.key.startsWith(prefix))
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  return xmlResponse(
+    xmlDocument({
+      name: 'ListMultipartUploadsResult',
+      attributes: { xmlns: S3_XMLNS },
+      children: [
+        { name: 'Bucket', value: bucket },
+        { name: 'Prefix', value: prefix },
+        { name: 'MaxUploads', value: '1000' },
+        { name: 'IsTruncated', value: 'false' },
+        ...uploads.map((u) => ({
+          name: 'Upload',
+          children: [
+            { name: 'Key', value: u.key },
+            { name: 'UploadId', value: u.uploadId },
+            { name: 'Initiated', value: u.createdAt.toISOString() },
+            { name: 'StorageClass', value: 'STANDARD' },
+          ],
+        })),
+      ],
+    }),
+  );
+}
+
 export async function handleMultipart(
   request: Request,
   set: { status?: number | string },

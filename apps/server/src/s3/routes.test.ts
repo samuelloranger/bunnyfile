@@ -378,7 +378,7 @@ describe('presigned URLs', () => {
     expect(await getRes.text()).toBe('uploaded via presigned');
   });
 
-  it('expired presigned URL returns 400 ExpiredToken', async () => {
+  it('expired presigned URL returns 403 AccessDenied', async () => {
     const path = presignedUrl({
       method: 'GET',
       path: `/api/s3/${presignBucket}/hello.txt`,
@@ -388,8 +388,8 @@ describe('presigned URLs', () => {
     const res = await app.handle(
       new Request(`http://localhost${path}`, { method: 'GET', headers: { host: 'localhost' } }),
     );
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('ExpiredToken');
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain('Request has expired');
   });
 });
 

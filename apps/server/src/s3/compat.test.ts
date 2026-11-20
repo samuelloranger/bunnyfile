@@ -423,6 +423,58 @@ describe('S3 client compatibility', () => {
     });
   });
 
+  describe('subresource and header guards', () => {
+    it('rejects a response-* override containing CR/LF', async () => {
+      const bucket = `compat-hdr-${crypto.randomUUID().slice(0, 8)}`;
+      await createBucket(bucket);
+      await putObject(bucket, 'k.txt', 'x');
+      const res = await app.handle(
+        signedRequest({
+          method: 'GET',
+          path: `/api/s3/${bucket}/k.txt?response-content-type=a%0D%0AX-Injected%3A%201`,
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(res.headers.get('x-injected')).toBeNull();
+    });
+
+    it('does not create or delete a bucket for a bucket subresource request', async () => {
+      const bucket = `compat-sub-${crypto.randomUUID().slice(0, 8)}`;
+      const put = await app.handle(
+        signedRequest({
+          method: 'PUT',
+          path: `/api/s3/${bucket}?cors`,
+          body: '<CORSConfiguration/>',
+        }),
+      );
+      expect(put.status).toBe(501);
+      const head = await app.handle(signedRequest({ method: 'HEAD', path: `/api/s3/${bucket}` }));
+      expect(head.status).toBe(404);
+
+      await createBucket(bucket);
+      const del = await app.handle(
+        signedRequest({ method: 'DELETE', path: `/api/s3/${bucket}?uploads` }),
+      );
+      expect(del.status).toBe(501);
+      const still = await app.handle(signedRequest({ method: 'HEAD', path: `/api/s3/${bucket}` }));
+      expect(still.status).toBe(200);
+    });
+  });
+
+  describe('listing', () => {
+    it('URL-encodes keys when encoding-type=url is requested (AWS CLI default)', async () => {
+      const bucket = `compat-enc-${crypto.randomUUID().slice(0, 8)}`;
+      await createBucket(bucket);
+      await putObject(bucket, encodeURIComponent('dir/a b&c.txt').replace(/%2F/g, '/'), 'x');
+      const res = await app.handle(
+        signedRequest({ method: 'GET', path: `/api/s3/${bucket}?list-type=2&encoding-type=url` }),
+      );
+      const xml = await res.text();
+      expect(xml).toContain('<EncodingType>url</EncodingType>');
+      expect(xml).toContain('<Key>dir/a%20b%26c.txt</Key>');
+    });
+  });
+
   describe('rclone integration', () => {
     let serverProc: ReturnType<typeof Bun.spawn> | null = null;
     let port = 0;

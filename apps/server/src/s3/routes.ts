@@ -27,7 +27,7 @@ import {
   objectRel,
   putObject,
 } from './library';
-import { handleMultipart } from './multipart';
+import { handleMultipart, listMultipartUploads } from './multipart';
 import { PayloadError, payloadStream, payloadText } from './payload';
 import { verifyPresigned, verifySigV4 } from './sigv4';
 import { s3ErrorXml, unescapeXml, xmlDocument } from './xml';
@@ -234,27 +234,121 @@ async function deleteObjects(
   );
 }
 
+// Auth failures S3 reports as 403; malformed auth input stays 400.
+const FORBIDDEN_AUTH_CODES = new Set([
+  'AccessDenied',
+  'InvalidAccessKeyId',
+  'SignatureDoesNotMatch',
+  'RequestTimeTooSkewed',
+]);
+
+/**
+ * S3 subresources BunnyFile does not implement. Without this guard they fell
+ * through to the plain object handlers: `PUT ?tagging` overwrote the object
+ * with the tagging XML and `DELETE ?tagging` deleted it.
+ */
+const UNSUPPORTED_SUBRESOURCES = [
+  'accelerate',
+  'acl',
+  'analytics',
+  'attributes',
+  'cors',
+  'encryption',
+  'intelligent-tiering',
+  'inventory',
+  'legal-hold',
+  'lifecycle',
+  'logging',
+  'metadataConfiguration',
+  'metrics',
+  'notification',
+  'object-lock',
+  'ownershipControls',
+  'policy',
+  'policyStatus',
+  'publicAccessBlock',
+  'renameObject',
+  'replication',
+  'requestPayment',
+  'restore',
+  'retention',
+  'select',
+  'tagging',
+  'torrent',
+  'versions',
+  'website',
+];
+
+function unsupportedSubresource(url: URL, method: string, hasKey: boolean): string | null {
+  const found = UNSUPPORTED_SUBRESOURCES.find((name) => url.searchParams.has(name));
+  if (found) return found;
+  const versionId = url.searchParams.get('versionId');
+  if (versionId !== null && versionId !== 'null') return 'versionId';
+  // Only reading the (never enabled) versioning state is supported.
+  if (url.searchParams.has('versioning') && (hasKey || method !== 'GET')) return 'versioning';
+  return null;
+}
+
+// `response-*` query parameters override these headers on GET and HEAD.
+const RESPONSE_OVERRIDES: Record<string, string> = {
+  'response-cache-control': 'Cache-Control',
+  'response-content-disposition': 'Content-Disposition',
+  'response-content-encoding': 'Content-Encoding',
+  'response-content-language': 'Content-Language',
+  'response-content-type': 'Content-Type',
+  'response-expires': 'Expires',
+};
+
+/** The requested header overrides, or null when a value is not a valid header value. */
+function responseOverrides(url: URL): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const [param, header] of Object.entries(RESPONSE_OVERRIDES)) {
+    const value = url.searchParams.get(param);
+    if (value === null) continue;
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control chars is the intent
+    if (/[\x00-\x08\x0a-\x1f\x7f]/.test(value)) return null;
+    out[header] = value;
+  }
+  return out;
+}
+
+/** True when the URL carries a query parameter other than auth/SDK bookkeeping. */
+function hasSubresource(url: URL): boolean {
+  for (const name of url.searchParams.keys()) {
+    if (!/^x-amz-/i.test(name) && name !== 'x-id') return true;
+  }
+  return false;
+}
+
 function listResultToXml(
   bucket: string,
   prefix: string,
   maxKeys: number,
   result: Awaited<ReturnType<typeof listObjects>>,
   extra: Array<{ name: string; value: string }> = [],
+  urlEncode = false,
 ) {
+  // encoding-type=url: keys and prefixes are URL-encoded and the response says so.
+  const enc = (v: string) => (urlEncode ? encodeURIComponent(v).replace(/%2F/g, '/') : v);
   return xmlDocument({
     name: 'ListBucketResult',
     attributes: { xmlns: S3_XMLNS },
     children: [
       { name: 'Name', value: bucket },
-      { name: 'Prefix', value: prefix },
+      { name: 'Prefix', value: enc(prefix) },
       { name: 'KeyCount', value: String(result.objects.length + result.prefixes.length) },
       { name: 'MaxKeys', value: String(maxKeys) },
       { name: 'IsTruncated', value: String(result.isTruncated) },
-      ...extra,
+      ...(urlEncode ? [{ name: 'EncodingType', value: 'url' }] : []),
+      ...extra.map((e) =>
+        ['Delimiter', 'StartAfter', 'Marker', 'NextMarker'].includes(e.name)
+          ? { ...e, value: enc(e.value) }
+          : e,
+      ),
       ...result.objects.map((item) => ({
         name: 'Contents',
         children: [
-          { name: 'Key', value: item.key },
+          { name: 'Key', value: enc(item.key) },
           { name: 'LastModified', value: new Date(item.mtimeMs).toISOString() },
           { name: 'ETag', value: item.md5 ? `"${item.md5}"` : '' },
           { name: 'Size', value: String(item.size) },
@@ -263,10 +357,24 @@ function listResultToXml(
       })),
       ...result.prefixes.map((prefixValue) => ({
         name: 'CommonPrefixes',
-        children: [{ name: 'Prefix', value: prefixValue }],
+        children: [{ name: 'Prefix', value: enc(prefixValue) }],
       })),
     ],
   });
+}
+
+async function bucketMissing(
+  set: { status?: number | string },
+  bucket: string,
+  pathname: string,
+): Promise<Response | null> {
+  try {
+    await listObjects({ bucket, maxKeys: 1 });
+    return null;
+  } catch (err) {
+    if (err instanceof BucketError) return mapBucketError(set, err, pathname);
+    throw err;
+  }
 }
 
 function createS3Handler() {
@@ -280,7 +388,7 @@ function createS3Handler() {
     if (!verification.ok) {
       return s3Err(
         set,
-        verification.code === 'SignatureDoesNotMatch' ? 403 : 400,
+        FORBIDDEN_AUTH_CODES.has(verification.code) ? 403 : 400,
         verification.code,
         verification.message,
         pathname,
@@ -313,6 +421,17 @@ function createS3Handler() {
     }
     const { bucket, key } = parsed;
 
+    const unsupported = unsupportedSubresource(url, request.method, key !== null);
+    if (unsupported) {
+      return s3Err(
+        set,
+        501,
+        'NotImplemented',
+        `BunnyFile does not implement the ${unsupported} subresource`,
+        pathname,
+      );
+    }
+
     if (!bucket) {
       if (request.method !== 'GET') {
         return s3Err(set, 405, 'MethodNotAllowed', 'Method not allowed', pathname);
@@ -340,6 +459,17 @@ function createS3Handler() {
     }
 
     if (!key) {
+      // Bucket PUT/DELETE take no subresources here; anything else (?cors,
+      // ?policy, ...) must not create or delete the bucket.
+      if ((request.method === 'PUT' || request.method === 'DELETE') && hasSubresource(url)) {
+        return s3Err(
+          set,
+          501,
+          'NotImplemented',
+          'This bucket subresource is not implemented',
+          pathname,
+        );
+      }
       if (request.method === 'PUT') {
         try {
           await createBucket(bucket);
@@ -376,10 +506,37 @@ function createS3Handler() {
         }
         return new Response(null, { status: 200 });
       }
+      if (request.method === 'GET' && url.searchParams.has('location')) {
+        const missing = await bucketMissing(set, bucket, pathname);
+        if (missing) return missing;
+        // us-east-1 is reported as an empty LocationConstraint, like S3.
+        const region = s3Config().region;
+        return xmlResponse(
+          xmlDocument({
+            name: 'LocationConstraint',
+            attributes: { xmlns: S3_XMLNS },
+            value: region === 'us-east-1' ? '' : region,
+          }),
+        );
+      }
+      if (request.method === 'GET' && url.searchParams.has('versioning')) {
+        const missing = await bucketMissing(set, bucket, pathname);
+        if (missing) return missing;
+        // Versioning was never enabled: S3 answers with an empty configuration.
+        return xmlResponse(
+          xmlDocument({ name: 'VersioningConfiguration', attributes: { xmlns: S3_XMLNS } }),
+        );
+      }
+      if (request.method === 'GET' && url.searchParams.has('uploads')) {
+        const missing = await bucketMissing(set, bucket, pathname);
+        if (missing) return missing;
+        return listMultipartUploads(bucket, url.searchParams.get('prefix') ?? '');
+      }
       if (request.method === 'GET' && url.searchParams.get('list-type') === '2') {
         const prefix = url.searchParams.get('prefix') ?? '';
         const delimiter = url.searchParams.get('delimiter') ?? '';
         const continuationToken = url.searchParams.get('continuation-token') ?? '';
+        const startAfter = url.searchParams.get('start-after') ?? '';
         const maxKeys = Math.min(
           Math.max(Number.parseInt(url.searchParams.get('max-keys') ?? '1000', 10) || 1000, 1),
           1000,
@@ -391,6 +548,7 @@ function createS3Handler() {
             prefix,
             delimiter,
             continuationToken,
+            startAfter,
             maxKeys,
           });
         } catch (err) {
@@ -398,11 +556,23 @@ function createS3Handler() {
           throw err;
         }
         return xmlResponse(
-          listResultToXml(bucket, prefix, maxKeys, result, [
-            ...(result.nextContinuationToken
-              ? [{ name: 'NextContinuationToken', value: result.nextContinuationToken }]
-              : []),
-          ]),
+          listResultToXml(
+            bucket,
+            prefix,
+            maxKeys,
+            result,
+            [
+              ...(delimiter ? [{ name: 'Delimiter', value: delimiter }] : []),
+              ...(continuationToken
+                ? [{ name: 'ContinuationToken', value: continuationToken }]
+                : []),
+              ...(startAfter ? [{ name: 'StartAfter', value: startAfter }] : []),
+              ...(result.nextContinuationToken
+                ? [{ name: 'NextContinuationToken', value: result.nextContinuationToken }]
+                : []),
+            ],
+            url.searchParams.get('encoding-type') === 'url',
+          ),
         );
       }
       // ListObjects v1 (no list-type=2 param)
@@ -428,12 +598,20 @@ function createS3Handler() {
           throw err;
         }
         return xmlResponse(
-          listResultToXml(bucket, prefix, maxKeys, result, [
-            { name: 'Marker', value: marker },
-            ...(result.isTruncated && result.nextContinuationToken
-              ? [{ name: 'NextMarker', value: result.nextContinuationToken }]
-              : []),
-          ]),
+          listResultToXml(
+            bucket,
+            prefix,
+            maxKeys,
+            result,
+            [
+              ...(delimiter ? [{ name: 'Delimiter', value: delimiter }] : []),
+              { name: 'Marker', value: marker },
+              ...(result.isTruncated && result.nextContinuationToken
+                ? [{ name: 'NextMarker', value: result.nextContinuationToken }]
+                : []),
+            ],
+            url.searchParams.get('encoding-type') === 'url',
+          ),
         );
       }
       return s3Err(set, 405, 'MethodNotAllowed', 'Method not allowed', pathname);
@@ -582,12 +760,17 @@ function createS3Handler() {
           pathname,
         );
       }
+      const overrides = responseOverrides(url);
+      if (!overrides) {
+        return s3Err(set, 400, 'InvalidArgument', 'Invalid response-* header override', pathname);
+      }
       const contentType = mimeFromName(basenameOf(key));
       const headers = {
         'Content-Length': String(opened.stat.size),
         'Content-Type': contentType,
         ETag: etag,
         'Last-Modified': lastModified,
+        ...overrides,
       };
       if (request.method === 'HEAD') {
         return new Response(Bun.file(opened.path), { status: 200, headers });
@@ -624,7 +807,12 @@ function createS3Handler() {
     }
 
     if (request.method === 'DELETE') {
-      await deleteObject(bucket, key);
+      try {
+        await deleteObject(bucket, key);
+      } catch (err) {
+        if (err instanceof BucketError) return mapBucketError(set, err, pathname);
+        throw err;
+      }
       return new Response(null, { status: 204 });
     }
 
