@@ -10,12 +10,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import {
+  CompleteMultipartUploadCommand,
+  CopyObjectCommand,
   CreateBucketCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -37,6 +42,15 @@ const [{ app }, { runMigrations }] = await Promise.all([
 
 let s3: S3Client;
 const bucket = 'sdk-tests';
+
+async function status(send: Promise<unknown>): Promise<number> {
+  try {
+    await send;
+    return 200;
+  } catch (err) {
+    return (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? 0;
+  }
+}
 
 async function text(key: string): Promise<string> {
   const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -193,5 +207,97 @@ describe('AWS SDK for JavaScript over HTTPS', () => {
     );
     expect(res.Deleted ?? []).toEqual([]);
     expect(res.Errors ?? []).toEqual([]);
+  });
+
+  describe('conditional requests', () => {
+    const put = (Key: string, Body: string, extra: { IfNoneMatch?: string; IfMatch?: string }) =>
+      s3.send(new PutObjectCommand({ Bucket: bucket, Key, Body, ...extra }));
+
+    it('If-None-Match: * creates once and then refuses to overwrite', async () => {
+      expect(await status(put('lock.json', 'first', { IfNoneMatch: '*' }))).toBe(200);
+      expect(await status(put('lock.json', 'second', { IfNoneMatch: '*' }))).toBe(412);
+      expect(await text('lock.json')).toBe('first');
+    });
+
+    it('lets exactly one of several concurrent If-None-Match: * writes win', async () => {
+      const results = await Promise.all(
+        Array.from({ length: 5 }, (_, i) =>
+          status(put('race.json', `writer ${i}`, { IfNoneMatch: '*' })),
+        ),
+      );
+      expect(results.filter((r) => r === 200)).toHaveLength(1);
+      expect(results.filter((r) => r === 412)).toHaveLength(4);
+    });
+
+    it('If-Match replaces only the expected version', async () => {
+      const { ETag } = await put('cas.txt', 'v1', {});
+      expect(await status(put('cas.txt', 'v2', { IfMatch: '"not-the-etag"' }))).toBe(412);
+      expect(await status(put('cas.txt', 'v2', { IfMatch: ETag! }))).toBe(200);
+      expect(await text('cas.txt')).toBe('v2');
+      expect(await status(put('absent.txt', 'v1', { IfMatch: ETag! }))).toBe(404);
+    });
+
+    it('applies If-None-Match: * to CompleteMultipartUpload', async () => {
+      await put('mpu-lock.bin', 'existing', {});
+      const { UploadId } = await s3.send(
+        new CreateMultipartUploadCommand({ Bucket: bucket, Key: 'mpu-lock.bin' }),
+      );
+      const { ETag } = await s3.send(
+        new UploadPartCommand({
+          Bucket: bucket,
+          Key: 'mpu-lock.bin',
+          UploadId,
+          PartNumber: 1,
+          Body: 'replacement',
+        }),
+      );
+      const complete = s3.send(
+        new CompleteMultipartUploadCommand({
+          Bucket: bucket,
+          Key: 'mpu-lock.bin',
+          UploadId,
+          IfNoneMatch: '*',
+          MultipartUpload: { Parts: [{ PartNumber: 1, ETag }] },
+        }),
+      );
+      expect(await status(complete)).toBe(412);
+      expect(await text('mpu-lock.bin')).toBe('existing');
+    });
+
+    it('applies x-amz-copy-source-if-* to the CopyObject source', async () => {
+      const { ETag } = await put('copy-src.txt', 'source', {});
+      const copy = (extra: object) =>
+        s3.send(
+          new CopyObjectCommand({
+            Bucket: bucket,
+            Key: 'copy-dst.txt',
+            CopySource: `${bucket}/copy-src.txt`,
+            ...extra,
+          }),
+        );
+      expect(await status(copy({ CopySourceIfMatch: '"stale"' }))).toBe(412);
+      expect(await status(copy({ CopySourceIfNoneMatch: ETag }))).toBe(412);
+      expect(await status(copy({ CopySourceIfMatch: ETag }))).toBe(200);
+      expect(await text('copy-dst.txt')).toBe('source');
+    });
+
+    it('answers conditional GET and HEAD', async () => {
+      const { ETag } = await put('cond-read.txt', 'cached', {});
+      const get = (extra: object) =>
+        s3.send(new GetObjectCommand({ Bucket: bucket, Key: 'cond-read.txt', ...extra }));
+      expect(await status(get({ IfNoneMatch: ETag }))).toBe(304);
+      expect(await status(get({ IfMatch: '"stale"' }))).toBe(412);
+      expect(await status(get({ IfMatch: ETag }))).toBe(200);
+      const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: 'cond-read.txt' }));
+      expect(head.LastModified).toBeInstanceOf(Date);
+      const later = new Date(head.LastModified!.getTime() + 60_000);
+      expect(
+        await status(
+          s3.send(
+            new HeadObjectCommand({ Bucket: bucket, Key: 'cond-read.txt', IfModifiedSince: later }),
+          ),
+        ),
+      ).toBe(304);
+    });
   });
 });

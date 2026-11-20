@@ -65,18 +65,53 @@ function assertNotRoot(rel: string): void {
   }
 }
 
+const commitLocks = new Map<string, Promise<void>>();
+
+/**
+ * Runs `fn` while holding the commit lock for `destination`. Commits to the
+ * same path are serialized, so a precondition checked inside the lock still
+ * holds when the rename happens (conditional S3 writes rely on this).
+ */
+export async function withCommitLock<T>(destination: string, fn: () => Promise<T>): Promise<T> {
+  const previous = commitLocks.get(destination) ?? Promise.resolve();
+  let release!: () => void;
+  const current = previous.then(() => new Promise<void>((r) => (release = r)));
+  commitLocks.set(destination, current);
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (commitLocks.get(destination) === current) commitLocks.delete(destination);
+  }
+}
+
+export type UploadInfo = { size: number; sha256: string; md5: string };
+
+/**
+ * Hooks that run under the commit lock: `beforeCommit` may throw to abort the
+ * write (the temp file is removed, the destination is untouched), and
+ * `afterCommit` records the result before another commit to the path can start.
+ */
+export type CommitHooks = {
+  beforeCommit?: (info: UploadInfo) => Promise<void>;
+  afterCommit?: (info: UploadInfo & { mtimeMs: number; inode: number }) => Promise<void>;
+};
+
 export function writeUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
   root: string = FILES_ROOT,
+  hooks: CommitHooks = {},
 ): Promise<{ size: number; sha256: string; md5: string; mtimeMs: number; inode: number }> {
-  return trackUpload(doWriteUpload(rel, stream, root));
+  return trackUpload(doWriteUpload(rel, stream, root, hooks));
 }
 
 async function doWriteUpload(
   rel: string,
   stream: ReadableStream<Uint8Array>,
   root: string,
+  hooks: CommitHooks,
 ): Promise<{ size: number; sha256: string; md5: string; mtimeMs: number; inode: number }> {
   const destination = absFromRelOrThrow(rel, root);
   await mkdir(dirname(destination), { recursive: true });
@@ -139,35 +174,35 @@ async function doWriteUpload(
     throw err;
   }
 
-  try {
-    await rename(tmp, destination);
-  } catch (err) {
-    await rm(tmp, { force: true }).catch(() => {});
-    throw err;
-  }
-
-  // fsync the directory so the rename (the commit point) is itself durable.
-  // Best-effort: not supported on every platform; failure here doesn't mean
-  // the file is bad. Linux/macOS (the deploy targets) support it.
-  try {
-    const dh = await open(dirname(destination), 'r');
+  const info = { size, sha256: sha256Hash.digest('hex'), md5: md5Hash.digest('hex') };
+  return withCommitLock(destination, async () => {
     try {
-      await dh.sync();
-    } finally {
-      await dh.close();
+      await hooks.beforeCommit?.(info);
+      await rename(tmp, destination);
+    } catch (err) {
+      await rm(tmp, { force: true }).catch(() => {});
+      throw err;
     }
-  } catch {
-    // directory fsync unsupported — leave as-is
-  }
 
-  const st = await stat(destination);
-  return {
-    size,
-    sha256: sha256Hash.digest('hex'),
-    md5: md5Hash.digest('hex'),
-    mtimeMs: Math.round(st.mtimeMs),
-    inode: Number(st.ino),
-  };
+    // fsync the directory so the rename (the commit point) is itself durable.
+    // Best-effort: not supported on every platform; failure here doesn't mean
+    // the file is bad. Linux/macOS (the deploy targets) support it.
+    try {
+      const dh = await open(dirname(destination), 'r');
+      try {
+        await dh.sync();
+      } finally {
+        await dh.close();
+      }
+    } catch {
+      // directory fsync unsupported — leave as-is
+    }
+
+    const st = await stat(destination);
+    const committed = { ...info, mtimeMs: Math.round(st.mtimeMs), inode: Number(st.ino) };
+    await hooks.afterCommit?.(committed);
+    return committed;
+  });
 }
 
 export async function openStream(rel: string, root: string = FILES_ROOT) {

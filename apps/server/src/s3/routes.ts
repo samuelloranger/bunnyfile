@@ -7,15 +7,23 @@ import { createFileStream, DATA_ROOT, openStream, readRange, S3_ROOT } from '../
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { lookupS3SecretKey } from './access-keys';
 import {
+  checkWritePreconditions,
+  copySourcePreconditionFails,
+  PreconditionError,
+  readPreconditionStatus,
+} from './conditions';
+import {
   assertBucketName,
   BucketError,
   copyObject,
   createBucket,
+  currentEtag,
   deleteBucket,
   deleteObject,
   headObject,
   listBuckets,
   listObjects,
+  objectEtag,
   objectRel,
   putObject,
 } from './library';
@@ -466,8 +474,23 @@ function createS3Handler() {
         }
         let result: Awaited<ReturnType<typeof copyObject>>;
         try {
-          result = await copyObject(srcBucket, srcKey, bucket, key);
+          const source = await headObject(srcBucket, srcKey);
+          if (copySourcePreconditionFails(request, objectEtag(source), source.mtimeMs)) {
+            return s3Err(
+              set,
+              412,
+              'PreconditionFailed',
+              'At least one of the pre-conditions you specified did not hold',
+              pathname,
+            );
+          }
+          const precondition = (etag: string | null) => checkWritePreconditions(request, etag);
+          precondition(await currentEtag(bucket, key));
+          result = await copyObject(srcBucket, srcKey, bucket, key, precondition);
         } catch (err) {
+          if (err instanceof PreconditionError) {
+            return s3Err(set, err.status, err.code, err.message, pathname);
+          }
           if (err instanceof BucketError) {
             if (err.code === 'not_found') {
               return s3Err(set, 404, 'NoSuchKey', 'Copy source not found', pathname);
@@ -490,10 +513,18 @@ function createS3Handler() {
       }
       let result: Awaited<ReturnType<typeof putObject>>;
       try {
-        result = await putObject(bucket, key, payloadStream(request, verification.signing));
+        // Checked up front to fail fast, and again under the commit lock.
+        const precondition = (etag: string | null) => checkWritePreconditions(request, etag);
+        precondition(await currentEtag(bucket, key));
+        result = await putObject(
+          bucket,
+          key,
+          payloadStream(request, verification.signing),
+          precondition,
+        );
       } catch (err) {
         if (err instanceof BucketError) return mapBucketError(set, err, pathname, 'key');
-        if (err instanceof PayloadError) {
+        if (err instanceof PayloadError || err instanceof PreconditionError) {
           return s3Err(set, err.status, err.code, err.message, pathname);
         }
         return s3Err(
@@ -532,21 +563,34 @@ function createS3Handler() {
           md5: '',
         };
       }
-      const etag = info.md5 ? `"${info.md5}"` : `"${info.size}-${info.mtimeMs}"`;
+      const etag = `"${objectEtag(info)}"`;
+      const lastModified = new Date(opened.stat.mtimeMs).toUTCString();
+      const precondition = readPreconditionStatus(request, objectEtag(info), opened.stat.mtimeMs);
+      if (precondition === 304) {
+        return new Response(null, {
+          status: 304,
+          headers: { ETag: etag, 'Last-Modified': lastModified },
+        });
+      }
+      if (precondition === 412) {
+        if (request.method === 'HEAD') return new Response(null, { status: 412 });
+        return s3Err(
+          set,
+          412,
+          'PreconditionFailed',
+          'At least one of the pre-conditions you specified did not hold',
+          pathname,
+        );
+      }
       const contentType = mimeFromName(basenameOf(key));
       const headers = {
         'Content-Length': String(opened.stat.size),
         'Content-Type': contentType,
         ETag: etag,
+        'Last-Modified': lastModified,
       };
       if (request.method === 'HEAD') {
-        return new Response(Bun.file(opened.path), {
-          status: 200,
-          headers: {
-            ...headers,
-            'Last-Modified': new Date(opened.stat.mtimeMs).toUTCString(),
-          },
-        });
+        return new Response(Bun.file(opened.path), { status: 200, headers });
       }
       const range = request.headers.get('range');
       if (range) {
