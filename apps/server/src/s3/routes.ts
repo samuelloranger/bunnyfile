@@ -20,9 +20,9 @@ import {
   putObject,
 } from './library';
 import { handleMultipart } from './multipart';
-import { PayloadError, payloadStream } from './payload';
+import { PayloadError, payloadStream, payloadText } from './payload';
 import { verifyPresigned, verifySigV4 } from './sigv4';
-import { s3ErrorXml, xmlDocument } from './xml';
+import { s3ErrorXml, unescapeXml, xmlDocument } from './xml';
 
 await mkdir(S3_ROOT, { recursive: true });
 
@@ -123,6 +123,108 @@ function mapBucketError(
 }
 
 const S3_XMLNS = 'http://s3.amazonaws.com/doc/2006-03-01/';
+
+const MAX_DELETE_BODY = 2 * 1024 * 1024;
+
+type DeleteEntry = { key: string; versionId: string | null };
+
+/** Text between the first `<tag>` and its `</tag>` in `xml`, or null. */
+function element(xml: string, tag: string): string | null {
+  const start = xml.indexOf(`<${tag}>`);
+  if (start < 0) return null;
+  const end = xml.indexOf(`</${tag}>`, start);
+  return end < 0 ? null : xml.slice(start + tag.length + 2, end);
+}
+
+/**
+ * Parses a DeleteObjects body with a forward-only scan (no backtracking
+ * regexes, so a crafted body costs linear time). Null when the body is not a
+ * `<Delete>` document listing 1 to 1000 objects.
+ */
+function parseDeleteBody(xml: string): { quiet: boolean; entries: DeleteEntry[] } | null {
+  if (xml.includes('<![CDATA[')) return null;
+  const root = xml.indexOf('<Delete');
+  if (root < 0 || xml.lastIndexOf('</Delete>') < root) return null;
+  const entries: DeleteEntry[] = [];
+  for (let pos = root; ; ) {
+    let open = xml.indexOf('<Object', pos);
+    // Skip longer tag names that merely start with "Object".
+    while (open >= 0 && !/[\s>]/.test(xml[open + 7] ?? '')) open = xml.indexOf('<Object', open + 7);
+    if (open < 0) break;
+    const contentStart = xml.indexOf('>', open) + 1;
+    const close = xml.indexOf('</Object>', contentStart);
+    if (contentStart === 0 || close < 0) return null;
+    const inner = xml.slice(contentStart, close);
+    const rawKey = element(inner, 'Key');
+    const key = rawKey === null ? null : unescapeXml(rawKey);
+    if (key === null) return null;
+    const rawVersion = element(inner, 'VersionId');
+    entries.push({ key, versionId: rawVersion === null ? null : unescapeXml(rawVersion) });
+    if (entries.length > 1000) return null;
+    pos = close + '</Object>'.length;
+  }
+  if (entries.length === 0) return null;
+  const quiet = element(xml, 'Quiet')?.trim().toLowerCase() === 'true';
+  return { quiet, entries };
+}
+
+async function deleteObjects(
+  request: Request,
+  set: { status?: number | string },
+  bucket: string,
+  pathname: string,
+  signing: Parameters<typeof payloadText>[1],
+): Promise<Response> {
+  let body: string;
+  try {
+    body = await payloadText(request, signing, { maxBytes: MAX_DELETE_BODY });
+  } catch (err) {
+    if (err instanceof PayloadError) return s3Err(set, err.status, err.code, err.message, pathname);
+    throw err;
+  }
+  const parsed = parseDeleteBody(body);
+  if (!parsed) {
+    return s3Err(set, 400, 'MalformedXML', 'The Delete body must list 1 to 1000 objects', pathname);
+  }
+  try {
+    await listObjects({ bucket, maxKeys: 1 });
+  } catch (err) {
+    if (err instanceof BucketError) return mapBucketError(set, err, pathname);
+    throw err;
+  }
+  const results = [];
+  for (const { key, versionId } of parsed.entries) {
+    if (versionId !== null && versionId !== 'null') {
+      // No versioning: deleting the current object here would delete the wrong thing.
+      results.push({
+        name: 'Error',
+        children: [
+          { name: 'Key', value: key },
+          { name: 'VersionId', value: versionId },
+          { name: 'Code', value: 'NotImplemented' },
+          { name: 'Message', value: 'BunnyFile does not support object versions' },
+        ],
+      });
+      continue;
+    }
+    try {
+      await deleteObject(bucket, key);
+      if (!parsed.quiet) results.push({ name: 'Deleted', children: [{ name: 'Key', value: key }] });
+    } catch (err) {
+      results.push({
+        name: 'Error',
+        children: [
+          { name: 'Key', value: key },
+          { name: 'Code', value: err instanceof BucketError ? 'InvalidArgument' : 'InternalError' },
+          { name: 'Message', value: err instanceof Error ? err.message : String(err) },
+        ],
+      });
+    }
+  }
+  return xmlResponse(
+    xmlDocument({ name: 'DeleteResult', attributes: { xmlns: S3_XMLNS }, children: results }),
+  );
+}
 
 function listResultToXml(
   bucket: string,
@@ -241,6 +343,9 @@ function createS3Handler() {
           status: 200,
           headers: { Location: `/${bucket}` },
         });
+      }
+      if (request.method === 'POST' && url.searchParams.has('delete')) {
+        return deleteObjects(request, set, bucket, pathname, verification.signing);
       }
       if (request.method === 'DELETE') {
         try {
