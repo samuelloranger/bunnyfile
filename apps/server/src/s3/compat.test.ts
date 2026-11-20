@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { crc32 as zlibCrc32 } from 'node:zlib';
 import { readResponseBytes, sha256OfBytes, signedRequest } from './test-helpers';
 
 const testRoot = await mkdtemp(join(tmpdir(), 'bunnyfile-s3-compat-'));
@@ -255,6 +256,83 @@ describe('S3 client compatibility', () => {
         }
         await deleteBucket(pageBucket);
       }
+    });
+  });
+
+  describe('upload body encodings', () => {
+    const bucket = `compat-body-${crypto.randomUUID().slice(0, 8)}`;
+    beforeAll(() => createBucket(bucket));
+
+    function put(key: string, body: string, headers: Record<string, string>) {
+      return app.handle(
+        signedRequest({ method: 'PUT', path: `/api/s3/${bucket}/${key}`, body, headers }),
+      );
+    }
+
+    it('stores a plain body sent with Transfer-Encoding: chunked as-is', async () => {
+      // Bun has already removed the transport chunking; decoding again used
+      // to turn this into an empty object.
+      const res = await put('plain.txt', 'plain streamed body', {
+        'transfer-encoding': 'chunked',
+      });
+      expect(res.status).toBe(200);
+      expect(new TextDecoder().decode(await getObjectBytes(bucket, 'plain.txt'))).toBe(
+        'plain streamed body',
+      );
+    });
+
+    it('decodes aws-chunked sent with Content-Length instead of chunked transfer', async () => {
+      const framed = '5\r\nhello\r\n0\r\nx-amz-checksum-crc32:NhCmhg==\r\n\r\n';
+      const res = await put('framed.txt', framed, {
+        'content-encoding': 'aws-chunked',
+        'x-amz-decoded-content-length': '5',
+        'x-amz-trailer': 'x-amz-checksum-crc32',
+      });
+      expect(res.status).toBe(200);
+      expect(new TextDecoder().decode(await getObjectBytes(bucket, 'framed.txt'))).toBe('hello');
+    });
+
+    it('verifies a full-object checksum on CompleteMultipartUpload', async () => {
+      const key = 'full-object.bin';
+      const init = await app.handle(
+        signedRequest({ method: 'POST', path: `/api/s3/${bucket}/${key}?uploads` }),
+      );
+      const uploadId = /<UploadId>([^<]+)<\/UploadId>/.exec(await init.text())![1]!;
+      const part = await app.handle(
+        signedRequest({
+          method: 'PUT',
+          path: `/api/s3/${bucket}/${key}?partNumber=1&uploadId=${uploadId}`,
+          body: 'assembled bytes',
+        }),
+      );
+      const body = `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>${part.headers.get('etag')}</ETag></Part></CompleteMultipartUpload>`;
+      const complete = (crc: string) =>
+        app.handle(
+          signedRequest({
+            method: 'POST',
+            path: `/api/s3/${bucket}/${key}?uploadId=${uploadId}`,
+            body,
+            headers: { 'x-amz-checksum-crc32': crc, 'x-amz-checksum-type': 'FULL_OBJECT' },
+          }),
+        );
+
+      const wrong = await complete('AAAAAA==');
+      expect(wrong.status).toBe(400);
+      expect(await wrong.text()).toContain('<Code>BadDigest</Code>');
+      const crc = Buffer.alloc(4);
+      crc.writeUInt32BE(zlibCrc32('assembled bytes'));
+      expect((await complete(crc.toString('base64'))).status).toBe(200);
+      expect(new TextDecoder().decode(await getObjectBytes(bucket, key))).toBe('assembled bytes');
+    });
+
+    it('rejects a Content-MD5 mismatch and keeps the previous object', async () => {
+      await putObject(bucket, 'keep.txt', 'original');
+      const res = await put('keep.txt', 'corrupted in transit', {
+        'content-md5': createHash('md5').update('what the client meant').digest('base64'),
+      });
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain('<Code>BadDigest</Code>');
+      expect(new TextDecoder().decode(await getObjectBytes(bucket, 'keep.txt'))).toBe('original');
     });
   });
 
