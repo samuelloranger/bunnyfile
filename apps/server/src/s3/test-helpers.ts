@@ -1,4 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
+import { canonicalQuery as canonicalQueryString, canonicalUri } from './sigv4';
 
 export function sha256Hex(input: string): string {
   return createHash('sha256').update(input).digest('hex');
@@ -20,26 +21,8 @@ export function deriveSigningKey(
   return hmac(kService, 'aws4_request');
 }
 
-/** Mirrors sigv4.ts — must stay in sync with the server implementation. */
-export function canonicalUriPath(pathname: string): string {
-  return (
-    pathname
-      .split('/')
-      .map((seg) => {
-        let decoded: string;
-        try {
-          decoded = decodeURIComponent(seg);
-        } catch {
-          decoded = seg;
-        }
-        return encodeURIComponent(decoded).replace(
-          /[!'()*]/g,
-          (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-        );
-      })
-      .join('/') || '/'
-  );
-}
+/** The server's own canonicalization; `sigv4.test.ts` pins it to the spec. */
+export { canonicalUri as canonicalUriPath } from './sigv4';
 
 export type SignedRequestOptions = {
   method: string;
@@ -73,15 +56,12 @@ export function signedRequest({
   const service = 's3';
   const payloadHash = 'UNSIGNED-PAYLOAD';
   const url = new URL(`http://${host}${path}`);
-  const pairs = [...url.searchParams.entries()]
-    .map(([k, v]) => [encodeURIComponent(k), encodeURIComponent(v)] as [string, string])
-    .sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])));
-  const canonicalQuery = pairs.map(([k, v]) => `${k}=${v}`).join('&');
+  const canonicalQuery = canonicalQueryString(url);
   const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
   const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
   const canonicalRequest = [
     method,
-    canonicalUriPath(url.pathname),
+    canonicalUri(url.pathname),
     canonicalQuery,
     canonicalHeaders,
     signedHeaders,
