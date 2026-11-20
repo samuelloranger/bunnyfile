@@ -488,6 +488,8 @@ describe('S3 client compatibility', () => {
         await deleteObject(bucket, key);
       }
       expect(await listObjectKeys(bucket)).toEqual([]);
+      // Only the orphaned temp is left: the bucket counts as empty.
+      await deleteBucket(bucket);
     });
 
     it('URL-encodes keys when encoding-type=url is requested (AWS CLI default)', async () => {

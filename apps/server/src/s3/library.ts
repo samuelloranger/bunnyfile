@@ -62,7 +62,8 @@ async function hasAnyFile(dir: string): Promise<boolean> {
     try {
       const entries = await readdir(current, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.isFile()) return true;
+        // An orphaned temp from an interrupted write is not an object.
+        if (entry.isFile() && !isCommitTemp(entry.name)) return true;
         if (entry.isDirectory()) queue.push(resolve(current, entry.name));
       }
     } catch {
