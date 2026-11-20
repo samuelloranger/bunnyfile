@@ -12,10 +12,12 @@ import { Readable } from 'node:stream';
 import {
   CreateBucketCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const testRoot = await mkdtemp(join(tmpdir(), 'bunnyfile-s3-sdk-'));
 process.env.DB_PATH = join(testRoot, 'test.sqlite');
@@ -135,5 +137,31 @@ describe('AWS SDK for JavaScript over HTTPS', () => {
       new GetObjectCommand({ Bucket: bucket, Key: 'string.txt', ChecksumMode: 'ENABLED' }),
     );
     expect(await res.Body!.transformToString()).toBe('hello');
+  });
+
+  it('lists with a prefix containing characters SigV4 must percent-encode', async () => {
+    const key = "dir/it's (1) *x*! y.txt";
+    await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: 'x' }));
+    const res = await s3.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: "dir/it's (1) *x*!" }),
+    );
+    expect(res.Contents?.map((c) => c.Key)).toEqual([key]);
+  });
+
+  it('serves a presigned GET (the SDK adds x-amz-checksum-mode to the query)', async () => {
+    const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: 'string.txt' }));
+    expect(url).toContain('x-amz-checksum-mode');
+    const res = await fetch(url);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('hello');
+  });
+
+  it('accepts a presigned PUT', async () => {
+    const url = await getSignedUrl(
+      s3,
+      new PutObjectCommand({ Bucket: bucket, Key: 'presigned-put.txt' }),
+    );
+    expect((await fetch(url, { method: 'PUT', body: 'via presigned PUT' })).status).toBe(200);
+    expect(await text('presigned-put.txt')).toBe('via presigned PUT');
   });
 });

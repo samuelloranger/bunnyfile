@@ -41,33 +41,38 @@ function hmac(key: string | Buffer, data: string): Buffer {
   return createHmac('sha256', key).update(data).digest();
 }
 
-function uriEncodeSegment(segment: string): string {
-  return encodeURIComponent(segment).replace(
+/** SigV4 UriEncode: everything except A-Z a-z 0-9 - . _ ~ is percent-encoded. */
+export function uriEncode(value: string): string {
+  return encodeURIComponent(value).replace(
     /[!'()*]/g,
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 }
 
-function canonicalUri(pathname: string): string {
+export function canonicalUri(pathname: string): string {
   const parts = pathname.split('/').map((seg) => {
     try {
-      return uriEncodeSegment(decodeURIComponent(seg));
+      return uriEncode(decodeURIComponent(seg));
     } catch {
-      return uriEncodeSegment(seg);
+      return uriEncode(seg);
     }
   });
   return parts.join('/') || '/';
 }
 
-function canonicalQuery(url: URL): string {
+/**
+ * Encoded pairs sorted by byte order, as SigV4 requires. `localeCompare` is
+ * case-insensitive and put `x-amz-checksum-mode` (sent on every presigned URL
+ * by current AWS SDKs) before `X-Amz-*`, breaking the signature.
+ */
+export function canonicalQuery(url: URL, omit?: string): string {
   const pairs: Array<[string, string]> = [];
   for (const [k, v] of url.searchParams.entries()) {
-    pairs.push([encodeURIComponent(k), encodeURIComponent(v)]);
+    if (k !== omit) pairs.push([uriEncode(k), uriEncode(v)]);
   }
-  pairs.sort((a, b) => {
-    if (a[0] === b[0]) return a[1].localeCompare(b[1]);
-    return a[0].localeCompare(b[0]);
-  });
+  // Encoded strings are ASCII, so code-unit comparison is byte order.
+  const byteOrder = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  pairs.sort((a, b) => byteOrder(a[0], b[0]) || byteOrder(a[1], b[1]));
   return pairs.map(([k, v]) => `${k}=${v}`).join('&');
 }
 
@@ -256,14 +261,7 @@ export async function verifyPresigned(request: Request, config: SigV4Config): Pr
     })
     .join('\n');
 
-  const filteredParams = new URL(request.url).searchParams;
-  filteredParams.delete('X-Amz-Signature');
-  const pairs: Array<[string, string]> = [];
-  for (const [k, v] of filteredParams.entries()) {
-    pairs.push([encodeURIComponent(k), encodeURIComponent(v)]);
-  }
-  pairs.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])));
-  const canonicalQueryStr = pairs.map(([k, v]) => `${k}=${v}`).join('&');
+  const canonicalQueryStr = canonicalQuery(url, 'X-Amz-Signature');
 
   const canonicalRequest = [
     request.method.toUpperCase(),
