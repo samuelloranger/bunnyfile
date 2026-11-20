@@ -233,7 +233,7 @@ export async function verifyPresigned(request: Request, config: SigV4Config): Pr
     return asErr('RequestTimeTooSkewed', 'Request timestamp is too far in the future');
   }
   if (now > requestTime + expiresSeconds * 1000) {
-    return asErr('ExpiredToken', 'Presigned URL has expired');
+    return asErr('AccessDenied', 'Request has expired');
   }
 
   const slash = credential.indexOf('/');
