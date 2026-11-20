@@ -33,6 +33,17 @@ function S3KeysPage() {
   const [newKeyName, setNewKeyName] = useState('');
   const [generatedKey, setGeneratedKey] = useState<NewKey | null>(null);
   const endpoint = typeof window !== 'undefined' ? `${window.location.origin}/api/s3` : '/api/s3';
+  const s3Domain = useQuery({
+    queryKey: ['s3-endpoint'],
+    queryFn: async () => {
+      const { data, error } = await api.api.settings['s3-endpoint'].get();
+      if (error) throw error;
+      return data.s3Domain;
+    },
+  }).data;
+  // restic, kopia and mc need S3 at the root of a host; set by S3_DOMAIN. It is
+  // its own TLS host, so the page's scheme (http on a LAN visit) says nothing about it.
+  const rootEndpoint = s3Domain ? `https://${s3Domain}` : null;
 
   const keys = useQuery({
     queryKey: ['s3-keys'],
@@ -97,6 +108,15 @@ function S3KeysPage() {
           <p className="mt-0.5 text-sm text-[hsl(var(--muted-foreground))]">
             Any access key can read and write every bucket on this instance. Endpoint:{' '}
             <code className="rounded bg-[hsl(var(--muted))] px-1 py-0.5 text-xs">{endpoint}</code>
+            {rootEndpoint && (
+              <>
+                {' '}
+                · restic, kopia and mc:{' '}
+                <code className="rounded bg-[hsl(var(--muted))] px-1 py-0.5 text-xs">
+                  {rootEndpoint}
+                </code>
+              </>
+            )}
           </p>
         </div>
         <Button size="md" leftIcon={<Plus />} onClick={() => setShowCreate(true)}>
@@ -188,6 +208,9 @@ function S3KeysPage() {
             <SecretField label="Access Key ID" value={generatedKey?.accessKeyId ?? ''} />
             <SecretField label="Secret Access Key" value={generatedKey?.secretAccessKey ?? ''} />
             <SecretField label="Endpoint" value={endpoint} />
+            {rootEndpoint && (
+              <SecretField label="Endpoint for restic, kopia and mc" value={rootEndpoint} />
+            )}
           </div>
           <div className="mt-4 flex justify-end">
             <Button onClick={() => setGeneratedKey(null)}>I&apos;ve saved my key</Button>

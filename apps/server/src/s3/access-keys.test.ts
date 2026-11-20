@@ -10,12 +10,15 @@ process.env.BETTER_AUTH_SECRET = 'test-secret-for-encryption';
 process.env.S3_ACCESS_KEY_ID = 'test-access-key';
 process.env.S3_SECRET_ACCESS_KEY = 'test-secret';
 
+let signedIn = true;
+
 mock.module('../auth/auth', () => ({
   auth: {
     api: {
-      getSession: async () => ({
-        user: { id: 'test-user-id', role: 'admin', email: 'test@example.com' },
-      }),
+      getSession: async () =>
+        signedIn
+          ? { user: { id: 'test-user-id', role: 'admin', email: 'test@example.com' } }
+          : null,
     },
   },
 }));
@@ -74,6 +77,26 @@ describe('access-keys crypto', () => {
 });
 
 describe('access-keys HTTP routes', () => {
+  it('GET /api/settings/s3-endpoint reports S3_DOMAIN, or null when unset', async () => {
+    const get = async () =>
+      (await app.handle(new Request('http://localhost/api/settings/s3-endpoint'))).json();
+    delete process.env.S3_DOMAIN;
+    expect(await get()).toEqual({ s3Domain: null });
+    process.env.S3_DOMAIN = 's3.example.com';
+    try {
+      expect(await get()).toEqual({ s3Domain: 's3.example.com' });
+    } finally {
+      delete process.env.S3_DOMAIN;
+    }
+    signedIn = false;
+    try {
+      const res = await app.handle(new Request('http://localhost/api/settings/s3-endpoint'));
+      expect(res.status).toBe(401);
+    } finally {
+      signedIn = true;
+    }
+  });
+
   it('POST /api/settings/s3-keys creates a key and returns secret once', async () => {
     const res = await app.handle(
       new Request('http://localhost/api/settings/s3-keys', {
