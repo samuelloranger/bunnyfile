@@ -68,12 +68,28 @@ Two credential sources work at the same time:
    - `S3_ACCESS_KEY_ID`
    - `S3_SECRET_ACCESS_KEY`
    - `S3_REGION` (default `us-east-1`)
+   - `S3_DOMAIN` (optional): a hostname that serves the S3 API at its root (see [Endpoints](#endpoints))
 
 2. **Per-user access keys** (recommended for multi-user):
    - Create keys in the web app under **S3 → Access keys**
    - Keys use the `BFAK…` prefix; the secret is shown once at creation
 
-All S3 requests must use **path-style** URLs: `/api/s3/{bucket}/{key}`.
+## Endpoints
+
+The S3 API is reachable two ways. Both use **path-style** addressing: the bucket is the first path segment, never a subdomain.
+
+| Endpoint | Use with |
+|---|---|
+| `https://your-host.example/api/s3` | rclone, the AWS CLI and AWS SDKs (anything that accepts an endpoint URL with a path) |
+| `https://s3.your-host.example` (set `S3_DOMAIN`) | restic, kopia, MinIO `mc` and anything else built on minio-go. These take a bare host as the endpoint and cannot reach `/api/s3` |
+
+**`S3_DOMAIN`**: use a hostname of its own, never the web app's (that host would then serve only S3). When a request's `Host` matches it (for example `S3_DOMAIN=s3.your-host.example`), BunnyFile serves the S3 API at the root of that host. Requests are read as `/{bucket}/{key}`, and the web app and `/api/*` are not served there. Point a DNS name at the same container, keep the `Host` header when proxying (Caddy does by default), and do not rewrite the path, because the signature covers it:
+
+```caddy
+s3.your-host.example {
+	reverse_proxy bunnyfile:3001
+}
+```
 
 ## Client configuration
 
@@ -102,34 +118,44 @@ rclone sync bunnyfile:my-bucket ./backup
 aws configure set aws_access_key_id YOUR_ACCESS_KEY_ID
 aws configure set aws_secret_access_key YOUR_SECRET_ACCESS_KEY
 aws configure set default.region us-east-1
+aws configure set default.s3.addressing_style path
+# `aws s3 presign` defaults to SigV2 URLs, which BunnyFile does not accept.
+aws configure set default.s3.signature_version s3v4
 
 aws --endpoint-url https://your-host.example/api/s3 s3 cp file.txt s3://my-bucket/
 aws --endpoint-url https://your-host.example/api/s3 s3 ls s3://my-bucket/
 ```
 
-### restic
+AWS SDKs need path-style addressing too: `forcePathStyle: true` (JavaScript), `Config(s3={'addressing_style': 'path'})` (boto3), `UsePathStyle = true` (Go v2).
+
+### restic (needs `S3_DOMAIN`)
 
 ```bash
 export AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY_ID
 export AWS_SECRET_ACCESS_KEY=YOUR_SECRET_ACCESS_KEY
 
-restic -r s3:https://your-host.example/my-bucket \
-  --option s3.region=us-east-1 \
-  --option s3.endpoint-url=https://your-host.example/api/s3 \
-  backup /path/to/data
+restic -r s3:https://s3.your-host.example/my-bucket init
+restic -r s3:https://s3.your-host.example/my-bucket backup /path/to/data
 ```
 
-### kopia
+### kopia (needs `S3_DOMAIN`)
 
-```kopia
-type: s3
-config:
-  bucket: my-bucket
-  endpoint: https://your-host.example/api/s3
-  accessKeyID: YOUR_ACCESS_KEY_ID
-  secretAccessKey: YOUR_SECRET_ACCESS_KEY
-  sessionToken: ""
-  region: us-east-1
+```bash
+kopia repository create s3 \
+  --bucket=my-bucket \
+  --endpoint=s3.your-host.example \
+  --region=us-east-1 \
+  --access-key=YOUR_ACCESS_KEY_ID \
+  --secret-access-key=YOUR_SECRET_ACCESS_KEY
+```
+
+Add `--disable-tls` if the endpoint is plain HTTP.
+
+### MinIO client (needs `S3_DOMAIN`)
+
+```bash
+mc alias set bunnyfile https://s3.your-host.example YOUR_ACCESS_KEY_ID YOUR_SECRET_ACCESS_KEY
+mc mirror ./local bunnyfile/my-bucket
 ```
 
 ## Intentionally unsupported
@@ -157,7 +183,8 @@ Automated coverage lives in `apps/server/src/s3/`:
 - `routes.test.ts` — object lifecycle, CopyObject, presigned URLs
 - `multipart.test.ts` — multipart upload lifecycle
 - `access-keys.test.ts` — encrypted key storage + CRUD
-- `compat.test.ts` — byte-exact sync round-trip (SigV4 API) + optional `rclone sync` integration
+- `compat.test.ts`: byte-exact sync round-trip (SigV4 API), plus optional `rclone sync` and restic (`S3_DOMAIN` root mode) integration
+- `sdk.test.ts`: the AWS SDK for JavaScript over HTTPS, including `aws-chunked` uploads, presigned URLs and conditional writes
 
 Run locally:
 
@@ -165,4 +192,4 @@ Run locally:
 bun test apps/server/src/s3
 ```
 
-The rclone integration test runs when `rclone` is on `PATH` and is skipped otherwise (CI installs rclone).
+The rclone and restic integration tests run when the binary is on `PATH` and are skipped otherwise. CI installs both.

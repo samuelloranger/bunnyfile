@@ -104,6 +104,14 @@ async function hashDirectory(root: string): Promise<Map<string, string>> {
   return out;
 }
 
+const resticAvailable = (() => {
+  try {
+    return Bun.spawnSync(['restic', 'version'], { stdout: 'pipe', stderr: 'pipe' }).success;
+  } catch {
+    return false;
+  }
+})();
+
 const rcloneAvailable = (() => {
   try {
     const proc = Bun.spawnSync(['rclone', 'version'], { stdout: 'pipe', stderr: 'pipe' });
@@ -582,6 +590,98 @@ describe('S3 client compatibility', () => {
         }
       },
       30_000,
+    );
+  });
+
+  // restic uses minio-go, which needs S3 at the root of a host (S3_DOMAIN) and,
+  // over plain HTTP, uploads with signed aws-chunked bodies.
+  describe('restic integration (S3_DOMAIN root mode)', () => {
+    let serverProc: ReturnType<typeof Bun.spawn> | null = null;
+    let port = 0;
+    const serverRoot = join(testRoot, 'restic-server');
+    const sourceRoot = join(testRoot, 'restic-source');
+    const restoreRoot = join(testRoot, 'restic-restore');
+
+    function restic(...args: string[]) {
+      return Bun.spawnSync(['restic', '-r', `s3:http://127.0.0.1:${port}/restic-repo`, ...args], {
+        env: {
+          ...process.env,
+          AWS_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID!,
+          AWS_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY!,
+          RESTIC_PASSWORD: 'compat-restic-password',
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+    }
+
+    beforeAll(async () => {
+      if (!resticAvailable) return;
+      await mkdir(serverRoot, { recursive: true });
+      // Ask the OS for a free port instead of guessing one.
+      const probe = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
+      port = probe.port;
+      probe.stop(true);
+      serverProc = Bun.spawn({
+        cmd: ['bun', 'run', 'src/index.ts'],
+        cwd: join(import.meta.dir, '../..'),
+        env: {
+          ...process.env,
+          DB_PATH: join(serverRoot, 'test.sqlite'),
+          DATA_DIR: join(serverRoot, 'data'),
+          SERVER_PORT: String(port),
+          SERVER_HOST: '127.0.0.1',
+          S3_DOMAIN: '127.0.0.1',
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        if (serverProc.exitCode !== null) break;
+        try {
+          // 127.0.0.1 is the S3 host here; any other Host reaches the main app.
+          const res = await fetch(`http://127.0.0.1:${port}/api/health`, {
+            headers: { host: 'localhost' },
+          });
+          if (res.ok) return;
+        } catch {
+          // server still booting
+        }
+        await Bun.sleep(100);
+      }
+      throw new Error(`server did not start on port ${port} within 15s`);
+    }, 20_000);
+
+    afterAll(async () => {
+      if (serverProc) {
+        serverProc.kill();
+        await Promise.race([serverProc.exited, Bun.sleep(2000)]);
+      }
+    }, 10_000);
+
+    it.skipIf(!resticAvailable)(
+      'restic init, backup, check --read-data and restore are byte-exact',
+      async () => {
+        await mkdir(join(sourceRoot, 'nested'), { recursive: true });
+        await writeFile(join(sourceRoot, 'random.bin'), randomBytes(3 * 1024 * 1024));
+        await writeFile(join(sourceRoot, 'nested', 'note.txt'), 'restic through BunnyFile');
+
+        for (const args of [
+          ['init'],
+          ['backup', sourceRoot],
+          ['check', '--read-data'],
+          ['restore', 'latest', '--target', restoreRoot],
+        ]) {
+          const run = restic(...args);
+          if (!run.success) {
+            throw new Error(`restic ${args[0]} failed:\n${run.stderr.toString()}`);
+          }
+        }
+        const restored = await hashDirectory(join(restoreRoot, sourceRoot));
+        expect(restored).toEqual(await hashDirectory(sourceRoot));
+      },
+      60_000,
     );
   });
 });

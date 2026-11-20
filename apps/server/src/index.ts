@@ -22,7 +22,7 @@ import { drainUploads } from './inflight';
 import { prometheusMetrics, recordHttpRequest } from './metrics';
 import { accessKeyRoutes } from './s3/access-keys';
 import { s3ConsoleRoutes } from './s3/console-routes';
-import { s3Routes } from './s3/routes';
+import { isS3HostRequest, s3Handler, s3Routes } from './s3/routes';
 import { allowShareRequest, requestIp } from './shares/rate-limit';
 import { sharesRoutes } from './shares/routes';
 import { usersRoutes } from './users/routes';
@@ -36,8 +36,14 @@ const WEB_DIST = resolve(import.meta.dir, '../../web/dist');
 const INDEX_HTML = join(WEB_DIST, 'index.html');
 
 export const app = new Elysia({ serve: { maxRequestBodySize: 50 * 1024 ** 3 } })
-  .onRequest(() => {
+  .onRequest(({ request, set }) => {
     recordHttpRequest();
+    // Requests to S3_DOMAIN are S3 calls at the root (`/{bucket}/{key}`).
+    if (isS3HostRequest(request)) {
+      // The web app's CORS headers do not apply to the S3 endpoint.
+      for (const name of Object.keys(set.headers)) delete set.headers[name];
+      return s3Handler({ request, set });
+    }
   })
   .use(
     openapi({
