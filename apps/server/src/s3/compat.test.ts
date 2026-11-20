@@ -391,6 +391,38 @@ describe('S3 client compatibility', () => {
     });
   });
 
+  describe('conditional writes (raw)', () => {
+    const bucket = `compat-cond-${crypto.randomUUID().slice(0, 8)}`;
+    beforeAll(() => createBucket(bucket));
+
+    it('refuses CopyObject onto an existing key with If-None-Match: *', async () => {
+      await putObject(bucket, 'src.txt', 'new');
+      await putObject(bucket, 'dst.txt', 'old');
+      const res = await app.handle(
+        signedRequest({
+          method: 'PUT',
+          path: `/api/s3/${bucket}/dst.txt`,
+          headers: { 'x-amz-copy-source': `/${bucket}/src.txt`, 'if-none-match': '*' },
+        }),
+      );
+      expect(res.status).toBe(412);
+      expect(new TextDecoder().decode(await getObjectBytes(bucket, 'dst.txt'))).toBe('old');
+    });
+
+    it('uses strong comparison for If-Match (a weak tag never matches)', async () => {
+      const etag = await putObject(bucket, 'strong.txt', 'v1');
+      const res = await app.handle(
+        signedRequest({
+          method: 'PUT',
+          path: `/api/s3/${bucket}/strong.txt`,
+          body: 'v2',
+          headers: { 'if-match': `W/${etag}` },
+        }),
+      );
+      expect(res.status).toBe(412);
+    });
+  });
+
   describe('rclone integration', () => {
     let serverProc: ReturnType<typeof Bun.spawn> | null = null;
     let port = 0;

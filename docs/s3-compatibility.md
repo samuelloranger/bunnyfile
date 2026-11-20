@@ -45,6 +45,7 @@ The console uses session cookies (`/api/s3-console/*`), not SigV4. Empty folders
 | `ListObjects` / `ListObjectsV2` | Prefix, delimiter, pagination (`marker` / `continuation-token`) |
 | Multipart upload | `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListParts` |
 | `CopyObject` | Via `x-amz-copy-source` on `PUT` |
+| Conditional requests | `If-None-Match` / `If-Match` on `PutObject`, `CopyObject` and `CompleteMultipartUpload` (atomic, e.g. Terraform's S3 lockfile; `If-Match` uses strong comparison); `x-amz-copy-source-if-*` on `CopyObject`; `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since` on `GetObject` / `HeadObject` |
 | Presigned URLs | SigV4 query-string auth for `GET` and `PUT` (max 7-day expiry) |
 
 ## Upload integrity

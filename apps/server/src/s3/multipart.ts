@@ -6,10 +6,12 @@ import { db } from '../db';
 import { s3MultipartPart, s3MultipartUpload, s3Object } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
-import { absFromRelOrThrow, DATA_ROOT, MULTIPART_ROOT } from '../files/store';
+import { absFromRelOrThrow, DATA_ROOT, MULTIPART_ROOT, withCommitLock } from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { trackUpload } from '../inflight';
 import { type Checksum, createChecksum, isChecksumAlgorithm } from './checksums';
+import { checkWritePreconditions, PreconditionError } from './conditions';
+import { currentEtag } from './library';
 import { PayloadError, payloadStream, payloadText, type SigningContext } from './payload';
 import { s3ErrorXml, xmlDocument } from './xml';
 
@@ -216,6 +218,14 @@ async function completeMultipartUpload(
     throw err;
   }
   const fullObject = fullObjectChecksums(request);
+  try {
+    checkWritePreconditions(request, await currentEtag(bucket, key));
+  } catch (err) {
+    if (err instanceof PreconditionError) {
+      return s3Err(set, err.status, err.code, err.message, pathname);
+    }
+    throw err;
+  }
   const clientParts = parseCompleteBody(bodyText);
   if (!clientParts || clientParts.length === 0) {
     return s3Err(
@@ -279,32 +289,41 @@ async function completeMultipartUpload(
       pathname,
     );
   }
-  await rename(tmp, destAbs);
-
-  const destStat = await stat(destAbs);
   const etagWithQuotes = multipartEtag(partsToAssemble);
   const etagValue = etagWithQuotes.replace(/^"|"$/g, '');
-
-  await db
-    .insert(s3Object)
-    .values({
-      path: destRel,
-      bucket,
-      key,
-      size: totalSize,
-      mtimeMs: Math.round(destStat.mtimeMs),
-      inode: Number(destStat.ino),
-      md5: etagValue,
-    })
-    .onConflictDoUpdate({
-      target: s3Object.path,
-      set: {
-        size: totalSize,
-        mtimeMs: Math.round(destStat.mtimeMs),
-        inode: Number(destStat.ino),
-        md5: etagValue,
-      },
+  try {
+    await withCommitLock(destAbs, async () => {
+      checkWritePreconditions(request, await currentEtag(bucket, key));
+      await rename(tmp, destAbs);
+      const destStat = await stat(destAbs);
+      await db
+        .insert(s3Object)
+        .values({
+          path: destRel,
+          bucket,
+          key,
+          size: totalSize,
+          mtimeMs: Math.round(destStat.mtimeMs),
+          inode: Number(destStat.ino),
+          md5: etagValue,
+        })
+        .onConflictDoUpdate({
+          target: s3Object.path,
+          set: {
+            size: totalSize,
+            mtimeMs: Math.round(destStat.mtimeMs),
+            inode: Number(destStat.ino),
+            md5: etagValue,
+          },
+        });
     });
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    if (err instanceof PreconditionError) {
+      return s3Err(set, err.status, err.code, err.message, pathname);
+    }
+    throw err;
+  }
 
   const mime = mimeFromName(basenameOf(key));
   if (isThumbnailable(mime)) {
