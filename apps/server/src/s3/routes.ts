@@ -65,8 +65,20 @@ type S3PathResult =
   | { invalid?: false; bucket: string; key: null }
   | { invalid?: false; bucket: string; key: string };
 
-function splitS3Path(pathname: string): S3PathResult {
-  const raw = pathname.replace(/^\/api\/s3\/?/, '');
+/**
+ * S3 can also be served at the root of its own hostname (`S3_DOMAIN`), as
+ * clients built on minio-go (restic, kopia, mc) require: they take a bare host
+ * as the endpoint and put the bucket first in the path.
+ */
+export function isS3HostRequest(request: Request): boolean {
+  const domain = Bun.env.S3_DOMAIN?.trim().toLowerCase();
+  if (!domain) return false;
+  const host = (request.headers.get('host') ?? '').toLowerCase().replace(/:\d+$/, '');
+  return host === domain;
+}
+
+function splitS3Path(pathname: string, atRoot: boolean): S3PathResult {
+  const raw = atRoot ? pathname.replace(/^\//, '') : pathname.replace(/^\/api\/s3\/?/, '');
   if (!raw) return { bucket: null, key: null };
   const parts = raw.split('/');
   const bucket = decodePathPart(parts[0] ?? '');
@@ -409,7 +421,7 @@ function createS3Handler() {
       );
     }
 
-    const parsed = splitS3Path(pathname);
+    const parsed = splitS3Path(pathname, isS3HostRequest(request));
     if (parsed.invalid) {
       return s3Err(
         set,
@@ -820,7 +832,7 @@ function createS3Handler() {
   };
 }
 
-const s3Handler = createS3Handler();
+export const s3Handler = createS3Handler();
 
 export const s3Routes = new Elysia({ name: 's3' })
   .get('/api/s3', s3Handler)
