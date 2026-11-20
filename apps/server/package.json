@@ -33,6 +33,7 @@
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1173.0",
     "@aws-sdk/lib-storage": "3.1173.0",
+    "@aws-sdk/s3-request-presigner": "3.1173.0",
     "@types/nodemailer": "8.0.2",
     "drizzle-kit": "0.31.11"
   }
