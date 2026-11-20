@@ -65,6 +65,22 @@ function assertNotRoot(rel: string): void {
   }
 }
 
+/**
+ * Temp path for a write-then-rename into `destination`: a dot-prefixed sibling
+ * (same directory keeps the rename atomic) that `isCommitTemp` recognises.
+ */
+export function commitTempPath(destination: string): string {
+  return join(
+    dirname(destination),
+    `.${basename(destination)}.tmp-${crypto.randomUUID().slice(0, 8)}`,
+  );
+}
+
+/** True for a name created by `commitTempPath` (an in-flight or orphaned write). */
+export function isCommitTemp(name: string): boolean {
+  return /^\..+\.tmp-[0-9a-f]{8}$/.test(name);
+}
+
 const commitLocks = new Map<string, Promise<void>>();
 
 /**
@@ -120,10 +136,7 @@ async function doWriteUpload(
   // dotfiles, so an in-flight/orphaned temp is never indexed — and the marker
   // can't collide with a *visible* user path (a user file like
   // `report.tmp-1a2b3c4d` stays listed). Same dir keeps the rename atomic.
-  const tmp = join(
-    dirname(destination),
-    `.${basename(destination)}.tmp-${crypto.randomUUID().slice(0, 8)}`,
-  );
+  const tmp = commitTempPath(destination);
   const sha256Hash = createHash('sha256');
   const md5Hash = createHash('md5');
   let size = 0;

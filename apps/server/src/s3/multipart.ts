@@ -6,7 +6,13 @@ import { db } from '../db';
 import { s3MultipartPart, s3MultipartUpload, s3Object } from '../db/schema';
 import { mimeFromName } from '../files/mime';
 import { basenameOf } from '../files/paths';
-import { absFromRelOrThrow, DATA_ROOT, MULTIPART_ROOT, withCommitLock } from '../files/store';
+import {
+  absFromRelOrThrow,
+  commitTempPath,
+  DATA_ROOT,
+  MULTIPART_ROOT,
+  withCommitLock,
+} from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { trackUpload } from '../inflight';
 import { type Checksum, createChecksum, isChecksumAlgorithm } from './checksums';
@@ -268,7 +274,7 @@ async function completeMultipartUpload(
   const destRel = `s3/${bucket}/${key}`;
   const destAbs = absFromRelOrThrow(destRel, DATA_ROOT);
   await mkdir(dirname(destAbs), { recursive: true });
-  const tmp = `${destAbs}.tmp-${crypto.randomUUID().slice(0, 8)}`;
+  const tmp = commitTempPath(destAbs);
   const writer = Bun.file(tmp).writer();
   let totalSize = 0;
   for (const part of partsToAssemble) {

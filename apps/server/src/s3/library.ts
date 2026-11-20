@@ -4,9 +4,11 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { s3Object } from '../db/schema';
 import {
+  commitTempPath,
   createFileStream,
   DATA_ROOT,
   hashOnDisk,
+  isCommitTemp,
   openStream,
   PathError,
   removeFile,
@@ -337,7 +339,9 @@ async function walkObjects(bucket: string): Promise<WalkRow[]> {
     const { dir, prefix } = queue.shift()!;
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.name.startsWith('.') && entry.name !== '.keep') continue;
+      // Only in-flight temp files are hidden; keys such as `.git/config` or
+      // `.env` are ordinary objects and must be listed.
+      if (isCommitTemp(entry.name)) continue;
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
       const abs = resolve(dir, entry.name);
       if (entry.isDirectory()) {
@@ -446,7 +450,7 @@ export async function copyObject(
   const srcAbs = resolve(DATA_ROOT, srcRel);
   const destAbs = resolve(DATA_ROOT, dstRel);
   await mkdir(dirname(destAbs), { recursive: true });
-  const tmp = `${destAbs}.tmp-${crypto.randomUUID().slice(0, 8)}`;
+  const tmp = commitTempPath(destAbs);
   await copyFile(srcAbs, tmp);
   const destStat = await withCommitLock(destAbs, async () => {
     try {
