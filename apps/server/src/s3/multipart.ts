@@ -9,7 +9,8 @@ import { basenameOf } from '../files/paths';
 import { absFromRelOrThrow, DATA_ROOT, MULTIPART_ROOT } from '../files/store';
 import { generateAndStoreThumbnail, isThumbnailable } from '../files/thumbnail';
 import { trackUpload } from '../inflight';
-import { bodyStream } from './chunked';
+import { type Checksum, createChecksum, isChecksumAlgorithm } from './checksums';
+import { PayloadError, payloadStream, payloadText, type SigningContext } from './payload';
 import { s3ErrorXml, xmlDocument } from './xml';
 
 const MULTIPART_DIR = MULTIPART_ROOT;
@@ -99,6 +100,28 @@ function parseCompleteBody(xml: string): Array<{ partNumber: number; etag: strin
   return parts.sort((a, b) => a.partNumber - b.partNumber);
 }
 
+/**
+ * Full-object checksums sent on CompleteMultipartUpload (AWS CLI v2 sends
+ * CRC64NVME this way). Composite checksums (`<base64>-<parts>`) are checksums
+ * of part checksums; the parts were already verified on upload, so those are
+ * accepted as-is.
+ */
+function fullObjectChecksums(
+  request: Request,
+): Array<{ header: string; expected: string; check: Checksum }> {
+  if (request.headers.get('x-amz-checksum-type')?.toUpperCase() === 'COMPOSITE') return [];
+  const out: Array<{ header: string; expected: string; check: Checksum }> = [];
+  for (const [rawName, value] of request.headers) {
+    const name = rawName.toLowerCase();
+    const algorithm = name.replace(/^x-amz-checksum-/, '');
+    if (!name.startsWith('x-amz-checksum-') || !isChecksumAlgorithm(algorithm)) continue;
+    const expected = value.trim();
+    if (/-\d+$/.test(expected)) continue;
+    out.push({ header: name, expected, check: createChecksum(algorithm) });
+  }
+  return out;
+}
+
 function multipartEtag(parts: Array<{ md5: string }>): string {
   const combined = Buffer.concat(parts.map((p) => Buffer.from(p.md5, 'hex')));
   const hash = createHash('md5').update(combined).digest('hex');
@@ -133,6 +156,7 @@ async function uploadPart(
   key: string,
   uploadId: string,
   partNumber: number,
+  signing: SigningContext | undefined,
 ): Promise<Response> {
   const upload = db
     .select({ uploadId: s3MultipartUpload.uploadId })
@@ -147,7 +171,14 @@ async function uploadPart(
     .get();
   if (!upload) return s3Err(set, 404, 'NoSuchUpload', 'Upload not found', uploadId);
 
-  const { size, md5, path } = await writePart(uploadId, partNumber, bodyStream(request));
+  let written: Awaited<ReturnType<typeof writePart>>;
+  try {
+    written = await writePart(uploadId, partNumber, payloadStream(request, signing));
+  } catch (err) {
+    if (err instanceof PayloadError) return s3Err(set, err.status, err.code, err.message, uploadId);
+    throw err;
+  }
+  const { size, md5, path } = written;
   db.delete(s3MultipartPart)
     .where(and(eq(s3MultipartPart.uploadId, uploadId), eq(s3MultipartPart.partNumber, partNumber)))
     .run();
@@ -162,6 +193,7 @@ async function completeMultipartUpload(
   key: string,
   uploadId: string,
   pathname: string,
+  signing: SigningContext | undefined,
 ): Promise<Response> {
   const upload = db
     .select({ uploadId: s3MultipartUpload.uploadId })
@@ -176,7 +208,14 @@ async function completeMultipartUpload(
     .get();
   if (!upload) return s3Err(set, 404, 'NoSuchUpload', 'Upload not found', pathname);
 
-  const bodyText = await request.text();
+  let bodyText: string;
+  try {
+    bodyText = await payloadText(request, signing, { checksumHeaders: false });
+  } catch (err) {
+    if (err instanceof PayloadError) return s3Err(set, err.status, err.code, err.message, pathname);
+    throw err;
+  }
+  const fullObject = fullObjectChecksums(request);
   const clientParts = parseCompleteBody(bodyText);
   if (!clientParts || clientParts.length === 0) {
     return s3Err(
@@ -223,11 +262,23 @@ async function completeMultipartUpload(
   const writer = Bun.file(tmp).writer();
   let totalSize = 0;
   for (const part of partsToAssemble) {
-    const data = await Bun.file(part.path).arrayBuffer();
-    writer.write(new Uint8Array(data));
+    const data = new Uint8Array(await Bun.file(part.path).arrayBuffer());
+    writer.write(data);
+    for (const c of fullObject) c.check.update(data);
     totalSize += data.byteLength;
   }
   await writer.end();
+  const mismatch = fullObject.find((c) => c.check.digestBase64() !== c.expected);
+  if (mismatch) {
+    await rm(tmp, { force: true }).catch(() => {});
+    return s3Err(
+      set,
+      400,
+      'BadDigest',
+      `${mismatch.header} does not match the assembled object`,
+      pathname,
+    );
+  }
   await rename(tmp, destAbs);
 
   const destStat = await stat(destAbs);
@@ -353,6 +404,7 @@ export async function handleMultipart(
   bucket: string,
   key: string,
   url: URL,
+  signing?: SigningContext,
 ): Promise<Response> {
   const method = request.method;
   const uploadId = url.searchParams.get('uploadId');
@@ -366,11 +418,13 @@ export async function handleMultipart(
     if (Number.isNaN(partNumber) || partNumber < 1 || partNumber > 10000) {
       return s3Err(set, 400, 'InvalidArgument', 'Part number must be 1–10000', url.pathname);
     }
-    return uploadPart(request, set, bucket, key, uploadId, partNumber);
+    return uploadPart(request, set, bucket, key, uploadId, partNumber, signing);
   }
 
   if (method === 'POST' && uploadId) {
-    return trackUpload(completeMultipartUpload(request, set, bucket, key, uploadId, url.pathname));
+    return trackUpload(
+      completeMultipartUpload(request, set, bucket, key, uploadId, url.pathname, signing),
+    );
   }
 
   if (method === 'DELETE' && uploadId) return abortMultipartUpload(set, uploadId);

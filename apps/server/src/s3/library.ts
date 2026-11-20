@@ -13,7 +13,6 @@ import {
   S3_ROOT,
   writeUpload,
 } from '../files/store';
-import { bodyStream } from './chunked';
 
 export class BucketError extends Error {
   constructor(
@@ -189,22 +188,16 @@ async function readObjectInfo(bucket: string, key: string): Promise<ObjectInfo> 
   };
 }
 
-export type PutObjectBody = ReadableStream<Uint8Array> | Request;
-
-function putObjectStream(source: PutObjectBody): ReadableStream<Uint8Array> {
-  return source instanceof Request ? bodyStream(source) : source;
-}
-
 export async function putObject(
   bucket: string,
   key: string,
-  source: PutObjectBody,
+  body: ReadableStream<Uint8Array>,
 ): Promise<ObjectInfo> {
   assertBucketName(bucket);
   assertObjectKey(key);
   await mkdir(join(S3_ROOT, bucket), { recursive: true });
   const rel = objectRel(bucket, key);
-  const result = await writeUpload(rel, putObjectStream(source), DATA_ROOT);
+  const result = await writeUpload(rel, body, DATA_ROOT);
   await db
     .insert(s3Object)
     .values({

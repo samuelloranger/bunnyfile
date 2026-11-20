@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import type { SigningContext } from './payload';
 
 export type SigV4Config = {
   region: string;
@@ -12,6 +13,8 @@ type SigV4Ok = {
   accessKeyId: string;
   scope: string;
   signedHeaders: string[];
+  /** Header-signed requests only: seeds aws-chunked chunk-signature checks. */
+  signing?: SigningContext;
 };
 
 type SigV4Err = {
@@ -183,6 +186,7 @@ export async function verifySigV4(request: Request, config: SigV4Config): Promis
     accessKeyId: parsed.accessKeyId,
     scope: parsed.scope,
     signedHeaders: signedHeaderNames,
+    signing: { signingKey, amzDate, scope: expectedScope, seedSignature: expectedSignature },
   };
 }
 

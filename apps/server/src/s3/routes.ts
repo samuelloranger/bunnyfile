@@ -20,6 +20,7 @@ import {
   putObject,
 } from './library';
 import { handleMultipart } from './multipart';
+import { PayloadError, payloadStream } from './payload';
 import { verifyPresigned, verifySigV4 } from './sigv4';
 import { s3ErrorXml, xmlDocument } from './xml';
 
@@ -331,7 +332,7 @@ function createS3Handler() {
       url.searchParams.has('uploadId') ||
       url.searchParams.has('partNumber')
     ) {
-      return handleMultipart(request, set, bucket, key, url);
+      return handleMultipart(request, set, bucket, key, url, verification.signing);
     }
     if (request.method === 'PUT') {
       const copySource = request.headers.get('x-amz-copy-source');
@@ -384,9 +385,12 @@ function createS3Handler() {
       }
       let result: Awaited<ReturnType<typeof putObject>>;
       try {
-        result = await putObject(bucket, key, request);
+        result = await putObject(bucket, key, payloadStream(request, verification.signing));
       } catch (err) {
         if (err instanceof BucketError) return mapBucketError(set, err, pathname, 'key');
+        if (err instanceof PayloadError) {
+          return s3Err(set, err.status, err.code, err.message, pathname);
+        }
         return s3Err(
           set,
           400,

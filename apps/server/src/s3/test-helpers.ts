@@ -46,6 +46,8 @@ export type SignedRequestOptions = {
   path: string;
   body?: string | Uint8Array;
   signatureSuffix?: string;
+  /** Extra unsigned headers (the server only canonicalizes SignedHeaders). */
+  headers?: Record<string, string>;
   accessKeyId?: string;
   secretAccessKey?: string;
   region?: string;
@@ -56,6 +58,7 @@ export function signedRequest({
   path,
   body,
   signatureSuffix = '',
+  headers = {},
   accessKeyId = process.env.S3_ACCESS_KEY_ID!,
   secretAccessKey = process.env.S3_SECRET_ACCESS_KEY!,
   region = process.env.S3_REGION ?? 'us-east-1',
@@ -94,6 +97,7 @@ export function signedRequest({
     method,
     body,
     headers: {
+      ...headers,
       authorization,
       host,
       'x-amz-date': amzDate,

@@ -37,7 +37,7 @@ The console uses session cookies (`/api/s3-console/*`), not SigV4. Empty folders
 | `CreateBucket` | `PUT /api/s3/{bucket}` |
 | `DeleteBucket` | `DELETE /api/s3/{bucket}` (must be empty) |
 | `HeadBucket` | `HEAD /api/s3/{bucket}` |
-| `PutObject` | Returns `ETag` (MD5 hex) |
+| `PutObject` | Returns `ETag` (MD5 hex). Accepts `aws-chunked` bodies (signed or unsigned, with or without trailers) |
 | `GetObject` | Full object + HTTP Range (including suffix ranges) |
 | `HeadObject` | Metadata + `ETag` |
 | `DeleteObject` | Idempotent |
@@ -45,6 +45,16 @@ The console uses session cookies (`/api/s3-console/*`), not SigV4. Empty folders
 | Multipart upload | `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListParts` |
 | `CopyObject` | Via `x-amz-copy-source` on `PUT` |
 | Presigned URLs | SigV4 query-string auth for `GET` and `PUT` (max 7-day expiry) |
+
+## Upload integrity
+
+Every write is checked before it is committed. On a mismatch the request fails and any previous version of the object stays as it was.
+
+- `Content-MD5`
+- A hex `x-amz-content-sha256` (signed payload)
+- `x-amz-checksum-crc32`, `-crc32c`, `-crc64nvme`, `-sha1` and `-sha256`, as headers or as `aws-chunked` trailers. Current AWS SDKs send these by default.
+- `aws-chunked` chunk and trailer signatures, and `x-amz-decoded-content-length`
+- A full-object checksum on `CompleteMultipartUpload`
 
 ## Authentication
 
