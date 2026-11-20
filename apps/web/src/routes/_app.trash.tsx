@@ -29,7 +29,6 @@ function TrashPage() {
     queryFn: async () => {
       const { data, error } = await api.api.trash.get();
       if (error) throw error;
-      if ('error' in data) throw new Error(data.error);
       return data.entries as TrashEntry[];
     },
   });

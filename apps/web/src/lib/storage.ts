@@ -14,7 +14,6 @@ export const storageUsageQuery = () =>
     queryFn: async () => {
       const { data, error } = await api.api.files.usage.get();
       if (error) throw error;
-      if ('error' in data) throw new Error(data.error);
       return data as StorageUsage;
     },
     refetchInterval: 10_000,
