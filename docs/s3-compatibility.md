@@ -37,13 +37,15 @@ The console uses session cookies (`/api/s3-console/*`), not SigV4. Empty folders
 | `CreateBucket` | `PUT /api/s3/{bucket}` |
 | `DeleteBucket` | `DELETE /api/s3/{bucket}` (must be empty) |
 | `HeadBucket` | `HEAD /api/s3/{bucket}` |
+| `GetBucketLocation` | Reports `S3_REGION` (empty for `us-east-1`, like S3) |
+| `GetBucketVersioning` | Always reports versioning as never enabled |
 | `PutObject` | Returns `ETag` (MD5 hex). Accepts `aws-chunked` bodies (signed or unsigned, with or without trailers) |
-| `GetObject` | Full object + HTTP Range (including suffix ranges) |
+| `GetObject` | Full object + HTTP Range (including suffix ranges); `response-*` header overrides |
 | `HeadObject` | Metadata + `ETag` |
 | `DeleteObject` | Idempotent |
 | `DeleteObjects` | Batch delete of up to 1000 keys (`POST /{bucket}?delete`), including quiet mode |
-| `ListObjects` / `ListObjectsV2` | Prefix, delimiter, pagination (`marker` / `continuation-token`) |
-| Multipart upload | `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListParts` |
+| `ListObjects` / `ListObjectsV2` | Prefix, delimiter, `start-after`, `encoding-type=url`, pagination (`marker` / `continuation-token`). Keys are listed in UTF-8 byte order, like S3 |
+| Multipart upload | `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListParts`, `ListMultipartUploads` |
 | `CopyObject` | Via `x-amz-copy-source` on `PUT` |
 | Conditional requests | `If-None-Match` / `If-Match` on `PutObject`, `CopyObject` and `CompleteMultipartUpload` (atomic, e.g. Terraform's S3 lockfile; `If-Match` uses strong comparison); `x-amz-copy-source-if-*` on `CopyObject`; `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since` on `GetObject` / `HeadObject` |
 | Presigned URLs | SigV4 query-string auth for `GET` and `PUT` (max 7-day expiry) |
@@ -146,7 +148,7 @@ These are out of scope per [PLAN.md](../PLAN.md). Clients that require them will
 | Event notifications (SNS/SQS) | Not planned |
 | CORS configuration API | CORS is fixed for the web app origin policy |
 
-If a client fails with errors about these features, check whether it can disable them (most backup tools can).
+Requests for these subresources (`?tagging`, `?acl`, `?versions`, `?lifecycle`, …) get `501 NotImplemented`. They never touch the object. If a client fails with errors about these features, check whether it can disable them (most backup tools can).
 
 ## Testing
 

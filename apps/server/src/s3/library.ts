@@ -283,6 +283,7 @@ export async function openObjectStream(
 export async function deleteObject(bucket: string, key: string): Promise<void> {
   assertBucketName(bucket);
   assertObjectKey(key);
+  await ensureBucketExists(bucket);
   const rel = objectRel(bucket, key);
   const bucketDir = join(S3_ROOT, bucket);
   const absObject = join(S3_ROOT, bucket, key);
@@ -304,6 +305,7 @@ export type ListObjectsInput = {
   prefix?: string;
   delimiter?: string;
   continuationToken?: string | undefined;
+  startAfter?: string | undefined;
   maxKeys?: number | undefined;
 };
 
@@ -315,6 +317,14 @@ export type ListObjectsResult = {
 };
 
 type WalkRow = { key: string; size: number; mtimeMs: number; md5: string };
+
+/**
+ * S3 lists keys in UTF-8 byte order. Sorting and the pagination cut-off must
+ * use the same order, or a page boundary can skip keys.
+ */
+export function compareKeys(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a), Buffer.from(b));
+}
 
 async function walkObjects(bucket: string): Promise<WalkRow[]> {
   const bucketDir = join(S3_ROOT, bucket);
@@ -348,7 +358,7 @@ async function walkObjects(bucket: string): Promise<WalkRow[]> {
       }
     }
   }
-  return out.sort((a, b) => a.key.localeCompare(b.key));
+  return out.sort((a, b) => compareKeys(a.key, b.key));
 }
 
 export async function listObjects(input: ListObjectsInput): Promise<ListObjectsResult> {
@@ -357,38 +367,41 @@ export async function listObjects(input: ListObjectsInput): Promise<ListObjectsR
     prefix = '',
     delimiter = '',
     continuationToken = '',
+    startAfter = '',
     maxKeys: rawMax = 1000,
   } = input;
   await ensureBucketExists(bucket);
   const maxKeys = Math.min(Math.max(rawMax || 1000, 1), 1000);
   const all = (await walkObjects(bucket)).filter((item) => item.key.startsWith(prefix));
-  const filtered = continuationToken ? all.filter((item) => item.key > continuationToken) : all;
-  const page = filtered.slice(0, maxKeys);
-  const isTruncated = filtered.length > page.length;
-  const nextContinuationToken = isTruncated ? (page[page.length - 1]?.key ?? undefined) : undefined;
-  const commonPrefixes = new Set<string>();
+  const after = continuationToken || startAfter;
+  const filtered = after ? all.filter((item) => compareKeys(item.key, after) > 0) : all;
+  // Walk keys in order. A common prefix counts as one entry toward maxKeys and
+  // swallows every key under it (they are contiguous in byte order), so the
+  // continuation token lands past the whole prefix and it is never repeated.
+  const commonPrefixes: string[] = [];
   const objects: ObjectInfo[] = [];
-  for (const item of page) {
-    if (delimiter) {
-      const rest = item.key.slice(prefix.length);
-      const idx = rest.indexOf(delimiter);
-      if (idx >= 0) {
-        commonPrefixes.add(item.key.slice(0, prefix.length + idx + delimiter.length));
-        continue;
-      }
+  let lastKey: string | undefined;
+  let i = 0;
+  while (i < filtered.length && objects.length + commonPrefixes.length < maxKeys) {
+    const item = filtered[i]!;
+    const idx = delimiter ? item.key.indexOf(delimiter, prefix.length) : -1;
+    if (idx >= 0) {
+      const common = item.key.slice(0, idx + delimiter.length);
+      commonPrefixes.push(common);
+      while (i < filtered.length && filtered[i]!.key.startsWith(common)) i++;
+      lastKey = filtered[i - 1]!.key;
+      continue;
     }
-    objects.push({
-      key: item.key,
-      size: item.size,
-      mtimeMs: item.mtimeMs,
-      md5: item.md5,
-    });
+    objects.push({ key: item.key, size: item.size, mtimeMs: item.mtimeMs, md5: item.md5 });
+    lastKey = item.key;
+    i++;
   }
+  const isTruncated = i < filtered.length;
   return {
     objects,
-    prefixes: [...commonPrefixes].sort((a, b) => a.localeCompare(b)),
+    prefixes: commonPrefixes,
     isTruncated,
-    nextContinuationToken,
+    nextContinuationToken: isTruncated ? lastKey : undefined,
   };
 }
 

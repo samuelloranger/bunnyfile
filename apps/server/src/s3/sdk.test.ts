@@ -14,11 +14,17 @@ import {
   CopyObjectCommand,
   CreateBucketCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
   DeleteObjectsCommand,
+  DeleteObjectTaggingCommand,
+  GetBucketLocationCommand,
+  GetBucketVersioningCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListMultipartUploadsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
+  PutObjectTaggingCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
@@ -298,6 +304,135 @@ describe('AWS SDK for JavaScript over HTTPS', () => {
           ),
         ),
       ).toBe(304);
+    });
+  });
+
+  describe('protocol details', () => {
+    it('pages through mixed-case keys without skipping any', async () => {
+      for (const Key of ['page/a', 'page/B', 'page/c', 'page/D']) {
+        await s3.send(new PutObjectCommand({ Bucket: bucket, Key, Body: 'x' }));
+      }
+      const seen: string[] = [];
+      let ContinuationToken: string | undefined;
+      do {
+        const res = await s3.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: 'page/',
+            MaxKeys: 1,
+            ContinuationToken,
+          }),
+        );
+        seen.push(...(res.Contents ?? []).map((c) => c.Key!));
+        ContinuationToken = res.NextContinuationToken;
+      } while (ContinuationToken);
+      expect(seen).toEqual(['page/B', 'page/D', 'page/a', 'page/c']);
+    });
+
+    it('counts common prefixes toward MaxKeys and never repeats one', async () => {
+      for (const Key of ['delim/a/1', 'delim/a/2', 'delim/a/3', 'delim/b', 'delim/c/1']) {
+        await s3.send(new PutObjectCommand({ Bucket: bucket, Key, Body: 'x' }));
+      }
+      const pages: string[][] = [];
+      let ContinuationToken: string | undefined;
+      do {
+        const res = await s3.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: 'delim/',
+            Delimiter: '/',
+            MaxKeys: 2,
+            ContinuationToken,
+          }),
+        );
+        pages.push([
+          ...(res.CommonPrefixes ?? []).map((p) => p.Prefix!),
+          ...(res.Contents ?? []).map((c) => c.Key!),
+        ]);
+        ContinuationToken = res.NextContinuationToken;
+      } while (ContinuationToken);
+      expect(pages).toEqual([['delim/a/', 'delim/b'], ['delim/c/']]);
+    });
+
+    it('honours StartAfter', async () => {
+      const res = await s3.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: 'page/', StartAfter: 'page/D' }),
+      );
+      expect(res.Contents?.map((c) => c.Key)).toEqual(['page/a', 'page/c']);
+      expect(res.StartAfter).toBe('page/D');
+    });
+
+    it('reports the bucket location and (disabled) versioning', async () => {
+      const location = await s3.send(new GetBucketLocationCommand({ Bucket: bucket }));
+      expect(location.LocationConstraint ?? '').toBe('');
+      const versioning = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
+      expect(versioning.Status).toBeUndefined();
+    });
+
+    it('lists in-progress multipart uploads', async () => {
+      const { UploadId } = await s3.send(
+        new CreateMultipartUploadCommand({ Bucket: bucket, Key: 'pending/upload.bin' }),
+      );
+      const res = await s3.send(
+        new ListMultipartUploadsCommand({ Bucket: bucket, Prefix: 'pending/' }),
+      );
+      expect(res.Uploads?.map((u) => [u.Key, u.UploadId])).toEqual([
+        ['pending/upload.bin', UploadId],
+      ]);
+    });
+
+    it('rejects unsupported subresources instead of touching the object', async () => {
+      await s3.send(new PutObjectCommand({ Bucket: bucket, Key: 'tagged.txt', Body: 'keep me' }));
+      const tag = s3.send(
+        new PutObjectTaggingCommand({
+          Bucket: bucket,
+          Key: 'tagged.txt',
+          Tagging: { TagSet: [{ Key: 'k', Value: 'v' }] },
+        }),
+      );
+      expect(await status(tag)).toBe(501);
+      expect(
+        await status(
+          s3.send(new DeleteObjectTaggingCommand({ Bucket: bucket, Key: 'tagged.txt' })),
+        ),
+      ).toBe(501);
+      expect(await text('tagged.txt')).toBe('keep me');
+    });
+
+    it('applies response-* header overrides on presigned GET', async () => {
+      const url = await getSignedUrl(
+        s3,
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: 'string.txt',
+          ResponseContentDisposition: 'attachment; filename="hello.txt"',
+          ResponseContentType: 'text/x-custom',
+        }),
+      );
+      const res = await fetch(url);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-disposition')).toBe('attachment; filename="hello.txt"');
+      expect(res.headers.get('content-type')).toBe('text/x-custom');
+    });
+
+    it('returns NoSuchBucket when deleting from a missing bucket', async () => {
+      const del = s3.send(new DeleteObjectCommand({ Bucket: 'no-such-bucket', Key: 'k' }));
+      expect(await status(del)).toBe(404);
+    });
+
+    it('answers 403 for an unknown access key', async () => {
+      const stranger = new S3Client({
+        endpoint: await s3.config.endpoint!().then(
+          (e) => `${e.protocol}//${e.hostname}:${e.port}${e.path}`,
+        ),
+        region: 'us-east-1',
+        forcePathStyle: true,
+        credentials: { accessKeyId: 'unknown', secretAccessKey: 'nope' },
+      });
+      expect(await status(stranger.send(new GetBucketLocationCommand({ Bucket: bucket })))).toBe(
+        403,
+      );
+      stranger.destroy();
     });
   });
 });
