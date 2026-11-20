@@ -62,7 +62,10 @@ function sameHex(a: string, b: string): boolean {
 class ByteReader {
   private buf: Uint8Array = new Uint8Array(0);
   private ended = false;
-  private reader: { read(): Promise<{ done: boolean; value?: Uint8Array | undefined }> };
+  private reader: {
+    read(): Promise<{ done: boolean; value?: Uint8Array | undefined }>;
+    cancel?(): Promise<void>;
+  };
 
   constructor(source: ReadableStream<Uint8Array>) {
     this.reader = source.getReader();
@@ -121,6 +124,10 @@ class ByteReader {
   async atEnd(): Promise<boolean> {
     return this.buf.length === 0 && !(await this.more());
   }
+
+  async cancel(): Promise<void> {
+    await this.reader.cancel?.().catch(() => {});
+  }
 }
 
 type ChunkedMode = { signed: boolean; trailer: boolean };
@@ -153,90 +160,95 @@ async function* decodeAwsChunked(
     throw new PayloadError('InvalidRequest', 'signed streaming payload requires header auth');
   }
   const reader = new ByteReader(source);
-  let previous = signing?.seedSignature ?? '';
-  const chunkStringToSign = (hash: string) =>
-    [
-      'AWS4-HMAC-SHA256-PAYLOAD',
-      signing!.amzDate,
-      signing!.scope,
-      previous,
-      EMPTY_SHA256,
-      hash,
-    ].join('\n');
+  try {
+    let previous = signing?.seedSignature ?? '';
+    const chunkStringToSign = (hash: string) =>
+      [
+        'AWS4-HMAC-SHA256-PAYLOAD',
+        signing!.amzDate,
+        signing!.scope,
+        previous,
+        EMPTY_SHA256,
+        hash,
+      ].join('\n');
 
-  for (;;) {
-    const header = await reader.line();
-    const [sizeHex = '', ...exts] = header.split(';');
-    if (!/^[0-9a-fA-F]+$/.test(sizeHex.trim())) {
-      throw new PayloadError('InvalidRequest', 'invalid aws-chunked chunk size');
-    }
-    const size = Number.parseInt(sizeHex.trim(), 16);
-    if (size > MAX_CHUNK_SIZE)
-      throw new PayloadError('InvalidRequest', 'aws-chunked chunk too large');
-    const signature = exts
-      .map((e) => e.trim())
-      .find((e) => e.startsWith('chunk-signature='))
-      ?.slice('chunk-signature='.length);
-    if (mode.signed && !signature) {
-      throw new PayloadError('SignatureDoesNotMatch', 'missing chunk-signature');
-    }
-
-    const hash = mode.signed ? createHash('sha256') : null;
-    for await (const piece of reader.take(size)) {
-      hash?.update(piece);
-      yield piece;
-    }
-    if (mode.signed) {
-      const expected = createHmac('sha256', signing!.signingKey)
-        .update(chunkStringToSign(hash!.digest('hex')))
-        .digest('hex');
-      if (!sameHex(expected, signature!)) {
-        throw new PayloadError('SignatureDoesNotMatch', 'chunk signature does not match');
+    for (;;) {
+      const header = await reader.line();
+      const [sizeHex = '', ...exts] = header.split(';');
+      if (!/^[0-9a-fA-F]+$/.test(sizeHex.trim())) {
+        throw new PayloadError('InvalidRequest', 'invalid aws-chunked chunk size');
       }
-      previous = expected;
+      const size = Number.parseInt(sizeHex.trim(), 16);
+      if (size > MAX_CHUNK_SIZE)
+        throw new PayloadError('InvalidRequest', 'aws-chunked chunk too large');
+      const signature = exts
+        .map((e) => e.trim())
+        .find((e) => e.startsWith('chunk-signature='))
+        ?.slice('chunk-signature='.length);
+      if (mode.signed && !signature) {
+        throw new PayloadError('SignatureDoesNotMatch', 'missing chunk-signature');
+      }
+
+      const hash = mode.signed ? createHash('sha256') : null;
+      for await (const piece of reader.take(size)) {
+        hash?.update(piece);
+        yield piece;
+      }
+      if (mode.signed) {
+        const expected = createHmac('sha256', signing!.signingKey)
+          .update(chunkStringToSign(hash!.digest('hex')))
+          .digest('hex');
+        if (!sameHex(expected, signature!)) {
+          throw new PayloadError('SignatureDoesNotMatch', 'chunk signature does not match');
+        }
+        previous = expected;
+      }
+
+      if (size === 0) break;
+      if ((await reader.line()) !== '') {
+        throw new PayloadError('InvalidRequest', 'aws-chunked chunk not followed by CRLF');
+      }
     }
 
-    if (size === 0) break;
-    if ((await reader.line()) !== '') {
-      throw new PayloadError('InvalidRequest', 'aws-chunked chunk not followed by CRLF');
+    // Trailer section: `name:value` lines, then an empty line. Bodies without a
+    // trailer end with that empty line (or, from lenient clients, with EOF).
+    if (!mode.trailer && (await reader.atEnd())) return;
+    let trailerSignature: string | undefined;
+    const signedLines: string[] = [];
+    for (;;) {
+      if (await reader.atEnd()) break;
+      const line = await reader.line();
+      if (line === '') break;
+      const colon = line.indexOf(':');
+      if (colon <= 0) throw new PayloadError('InvalidRequest', 'malformed aws-chunked trailer');
+      const name = line.slice(0, colon).trim().toLowerCase();
+      const value = line.slice(colon + 1).trim();
+      if (name === 'x-amz-trailer-signature') {
+        trailerSignature = value;
+      } else {
+        trailers.set(name, value);
+        signedLines.push(`${name}:${value}\n`);
+      }
     }
-  }
-
-  // Trailer section: `name:value` lines, then an empty line. Bodies without a
-  // trailer end with that empty line (or, from lenient clients, with EOF).
-  if (!mode.trailer && (await reader.atEnd())) return;
-  let trailerSignature: string | undefined;
-  const signedLines: string[] = [];
-  for (;;) {
-    if (await reader.atEnd()) break;
-    const line = await reader.line();
-    if (line === '') break;
-    const colon = line.indexOf(':');
-    if (colon <= 0) throw new PayloadError('InvalidRequest', 'malformed aws-chunked trailer');
-    const name = line.slice(0, colon).trim().toLowerCase();
-    const value = line.slice(colon + 1).trim();
-    if (name === 'x-amz-trailer-signature') {
-      trailerSignature = value;
-    } else {
-      trailers.set(name, value);
-      signedLines.push(`${name}:${value}\n`);
+    if (mode.signed && mode.trailer) {
+      const expected = createHmac('sha256', signing!.signingKey)
+        .update(
+          [
+            'AWS4-HMAC-SHA256-TRAILER',
+            signing!.amzDate,
+            signing!.scope,
+            previous,
+            sha256Hex(signedLines.join('')),
+          ].join('\n'),
+        )
+        .digest('hex');
+      if (!trailerSignature || !sameHex(expected, trailerSignature)) {
+        throw new PayloadError('SignatureDoesNotMatch', 'trailer signature does not match');
+      }
     }
-  }
-  if (mode.signed && mode.trailer) {
-    const expected = createHmac('sha256', signing!.signingKey)
-      .update(
-        [
-          'AWS4-HMAC-SHA256-TRAILER',
-          signing!.amzDate,
-          signing!.scope,
-          previous,
-          sha256Hex(signedLines.join('')),
-        ].join('\n'),
-      )
-      .digest('hex');
-    if (!trailerSignature || !sameHex(expected, trailerSignature)) {
-      throw new PayloadError('SignatureDoesNotMatch', 'trailer signature does not match');
-    }
+  } finally {
+    // Releases the request body if the consumer stops early.
+    await reader.cancel();
   }
 }
 
@@ -293,7 +305,8 @@ export function payloadStream(
   }
   for (const algorithm of CHECKSUM_ALGORITHMS) {
     const header = `x-amz-checksum-${algorithm}`;
-    const inHeader = checksumHeaders ? (request.headers.get(header)?.trim() ?? null) : null;
+    if (!checksumHeaders) continue;
+    const inHeader = request.headers.get(header)?.trim() ?? null;
     if (inHeader === null && !declaredTrailers.has(header)) continue;
     expectations.push({
       label: header,
@@ -344,18 +357,24 @@ export function payloadStream(
         controller.error(err);
       }
     },
-    async cancel(reason) {
-      await raw.cancel(reason).catch(() => {});
+    async cancel() {
+      // `raw` is locked by the reader inside `pieces`; ending the generator
+      // runs its `finally`, which cancels that reader.
+      await pieces.return(undefined).catch(() => {});
     },
   });
 }
 
 async function* streamPieces(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
   const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    if (value?.length) yield value;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value?.length) yield value;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
   }
 }
 

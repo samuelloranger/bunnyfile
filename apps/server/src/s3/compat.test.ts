@@ -306,13 +306,17 @@ describe('S3 client compatibility', () => {
         }),
       );
       const body = `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>${part.headers.get('etag')}</ETag></Part></CompleteMultipartUpload>`;
-      const complete = (crc: string) =>
+      const complete = (crc: string, extra: Record<string, string> = {}) =>
         app.handle(
           signedRequest({
             method: 'POST',
             path: `/api/s3/${bucket}/${key}?uploadId=${uploadId}`,
             body,
-            headers: { 'x-amz-checksum-crc32': crc, 'x-amz-checksum-type': 'FULL_OBJECT' },
+            headers: {
+              'x-amz-checksum-crc32': crc,
+              'x-amz-checksum-type': 'FULL_OBJECT',
+              ...extra,
+            },
           }),
         );
 
@@ -321,6 +325,11 @@ describe('S3 client compatibility', () => {
       expect(await wrong.text()).toContain('<Code>BadDigest</Code>');
       const crc = Buffer.alloc(4);
       crc.writeUInt32BE(zlibCrc32('assembled bytes'));
+      // Every full-object checksum is verified, not just the first header.
+      const oneWrong = await complete(crc.toString('base64'), {
+        'x-amz-checksum-sha256': createHash('sha256').update('other bytes').digest('base64'),
+      });
+      expect(oneWrong.status).toBe(400);
       expect((await complete(crc.toString('base64'))).status).toBe(200);
       expect(new TextDecoder().decode(await getObjectBytes(bucket, key))).toBe('assembled bytes');
     });

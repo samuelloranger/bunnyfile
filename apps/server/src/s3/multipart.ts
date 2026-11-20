@@ -101,24 +101,25 @@ function parseCompleteBody(xml: string): Array<{ partNumber: number; etag: strin
 }
 
 /**
- * A full-object checksum sent on CompleteMultipartUpload (AWS CLI v2 sends
+ * Full-object checksums sent on CompleteMultipartUpload (AWS CLI v2 sends
  * CRC64NVME this way). Composite checksums (`<base64>-<parts>`) are checksums
  * of part checksums; the parts were already verified on upload, so those are
  * accepted as-is.
  */
-function fullObjectChecksum(
+function fullObjectChecksums(
   request: Request,
-): { header: string; expected: string; check: Checksum } | null {
-  if (request.headers.get('x-amz-checksum-type')?.toUpperCase() === 'COMPOSITE') return null;
-  for (const [name, value] of request.headers) {
-    const algorithm = name.toLowerCase().replace(/^x-amz-checksum-/, '');
-    if (!name.toLowerCase().startsWith('x-amz-checksum-') || !isChecksumAlgorithm(algorithm))
-      continue;
+): Array<{ header: string; expected: string; check: Checksum }> {
+  if (request.headers.get('x-amz-checksum-type')?.toUpperCase() === 'COMPOSITE') return [];
+  const out: Array<{ header: string; expected: string; check: Checksum }> = [];
+  for (const [rawName, value] of request.headers) {
+    const name = rawName.toLowerCase();
+    const algorithm = name.replace(/^x-amz-checksum-/, '');
+    if (!name.startsWith('x-amz-checksum-') || !isChecksumAlgorithm(algorithm)) continue;
     const expected = value.trim();
-    if (/-\d+$/.test(expected)) return null;
-    return { header: name.toLowerCase(), expected, check: createChecksum(algorithm) };
+    if (/-\d+$/.test(expected)) continue;
+    out.push({ header: name, expected, check: createChecksum(algorithm) });
   }
-  return null;
+  return out;
 }
 
 function multipartEtag(parts: Array<{ md5: string }>): string {
@@ -214,7 +215,7 @@ async function completeMultipartUpload(
     if (err instanceof PayloadError) return s3Err(set, err.status, err.code, err.message, pathname);
     throw err;
   }
-  const fullObject = fullObjectChecksum(request);
+  const fullObject = fullObjectChecksums(request);
   const clientParts = parseCompleteBody(bodyText);
   if (!clientParts || clientParts.length === 0) {
     return s3Err(
@@ -263,17 +264,18 @@ async function completeMultipartUpload(
   for (const part of partsToAssemble) {
     const data = new Uint8Array(await Bun.file(part.path).arrayBuffer());
     writer.write(data);
-    fullObject?.check.update(data);
+    for (const c of fullObject) c.check.update(data);
     totalSize += data.byteLength;
   }
   await writer.end();
-  if (fullObject && fullObject.check.digestBase64() !== fullObject.expected) {
+  const mismatch = fullObject.find((c) => c.check.digestBase64() !== c.expected);
+  if (mismatch) {
     await rm(tmp, { force: true }).catch(() => {});
     return s3Err(
       set,
       400,
       'BadDigest',
-      `${fullObject.header} does not match the assembled object`,
+      `${mismatch.header} does not match the assembled object`,
       pathname,
     );
   }
