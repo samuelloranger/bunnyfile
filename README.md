@@ -2,6 +2,11 @@
 
 > Files, shared. That's it.
 
+> [!WARNING]
+> **This project is archived and no longer maintained.** No further releases or security fixes will ship. The last release, v0.7.1, keeps working, but run it at your own risk.
+>
+> Looking for something similar? [copyparty](https://github.com/9001/copyparty) or [FileBrowser Quantum](https://github.com/gtsteffaniak/filebrowser) for browsing and sharing files, and [Garage](https://garagehq.deuxfleurs.fr/) for a small S3-compatible object store.
+
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/samlo122)
 
 Lightweight self-hosted file hosting and sharing, built on Bun. S3-compatible API, upload progress feedback, and a minimal architecture. Replaces the "files" half of Nextcloud — nothing more.
